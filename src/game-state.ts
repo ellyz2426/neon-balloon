@@ -5,7 +5,7 @@
 
 export type GameMode = 'arcade' | 'balloon-trip' | 'survival';
 export type GamePhase = 'menu' | 'playing' | 'phase-complete' | 'game-over' | 'paused' | 'settings' | 'stats' | 'tutorial';
-export type EnemyType = 'basic' | 'chaser' | 'dodger' | 'boss' | 'bomber';
+export type EnemyType = 'basic' | 'chaser' | 'dodger' | 'boss' | 'bomber' | 'magnet';
 export type PowerUpType = 'shield' | 'speed' | 'extra-balloon' | 'lightning-immunity' | 'magnet' | 'freeze';
 export type Difficulty = 'easy' | 'normal' | 'hard';
 export type ColorTheme = 'neon-cyan' | 'neon-pink' | 'neon-green' | 'neon-gold';

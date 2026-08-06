@@ -118,6 +118,8 @@
     <div class="tip">• Chain defeats for combo multipliers</div>
     <div class="tip">• Dash through danger with brief invincibility</div>
     <div class="tip">• Watch for whirlpools pulling you toward water!</div>
+    <div class="tip">• Magnet enemies pull you in — keep your distance!</div>
+    <div class="tip">• Orange crumbling platforms break after landing!</div>
   </div>
   <div class="btn" id="btn-tutorial-back">
     <div class="btn-text">GOT IT!</div>

@@ -633,9 +633,10 @@ export class GameSystem extends createSystem({}) {
 
   // === ENEMIES ===
 
-  private spawnEnemy(type: 'basic' | 'chaser' | 'dodger' | 'boss' | 'bomber'): void {
+  private spawnEnemy(type: 'basic' | 'chaser' | 'dodger' | 'boss' | 'bomber' | 'magnet'): void {
     const side = Math.random() > 0.5 ? 1 : -1;
     const balloons = type === 'boss' ? 4 :
+                     type === 'magnet' ? 2 :
                      type === 'bomber' ? 2 :
                      type === 'chaser' ? 2 :
                      type === 'dodger' ? 1 : 2;
@@ -672,11 +673,13 @@ export class GameSystem extends createSystem({}) {
     const bodyColor = e.type === 'boss' ? 0x880044 :
                       e.type === 'bomber' ? 0x884488 :
                       e.type === 'chaser' ? 0x884400 :
-                      e.type === 'dodger' ? 0x008844 : 0x664444;
+                      e.type === 'dodger' ? 0x008844 :
+                      e.type === 'magnet' ? 0x444488 : 0x664444;
     const emissiveColor = e.type === 'boss' ? NEON_RED :
                           e.type === 'bomber' ? NEON_PINK :
                           e.type === 'chaser' ? NEON_ORANGE :
-                          e.type === 'dodger' ? NEON_GREEN : new Color(0x884444);
+                          e.type === 'dodger' ? NEON_GREEN :
+                          e.type === 'magnet' ? NEON_BLUE : new Color(0x884444);
 
     const bodyMat = new MeshStandardMaterial({
       color: bodyColor, emissive: emissiveColor, emissiveIntensity: 0.3,
@@ -694,6 +697,20 @@ export class GameSystem extends createSystem({}) {
     } else if (e.type === 'bomber') {
       // Bomber: wide, bulky box body
       body = new Mesh(new BoxGeometry(0.55 * bodyScale, 0.45 * bodyScale, 0.4 * bodyScale), bodyMat);
+    } else if (e.type === 'magnet') {
+      // Magnet: sphere with orbiting ring — gravity well enemy
+      body = new Mesh(new SphereGeometry(0.3 * bodyScale, 10, 8), bodyMat);
+      const orbitMat = new MeshStandardMaterial({
+        color: 0x222266, emissive: NEON_BLUE, emissiveIntensity: 0.6,
+        transparent: true, opacity: 0.7,
+      });
+      const orbitRing = new Mesh(new TorusGeometry(0.5 * bodyScale, 0.03, 6, 16), orbitMat);
+      orbitRing.rotation.x = Math.PI / 4;
+      group.add(orbitRing);
+      const orbitRing2 = new Mesh(new TorusGeometry(0.5 * bodyScale, 0.03, 6, 16), orbitMat.clone());
+      orbitRing2.rotation.x = -Math.PI / 4;
+      orbitRing2.rotation.z = Math.PI / 2;
+      group.add(orbitRing2);
     } else if (e.type === 'boss') {
       // Boss: large sphere with armored ring
       body = new Mesh(new SphereGeometry(0.35 * bodyScale, 10, 8), bodyMat);
@@ -881,9 +898,13 @@ export class GameSystem extends createSystem({}) {
           // Bomber appears from Phase 4+, more likely on Hard
           const bomberChance = state.currentPhase >= 4 ?
             (state.difficulty === 'hard' ? 0.2 : 0.1) : 0;
+          // Magnet appears from Phase 5+
+          const magnetChance = state.currentPhase >= 5 ?
+            (state.difficulty === 'hard' ? 0.15 : 0.08) : 0;
           const type = r < bomberChance ? 'bomber' :
-                       r < bomberChance + 0.15 ? 'dodger' :
-                       r < bomberChance + 0.4 ? 'chaser' : 'basic';
+                       r < bomberChance + magnetChance ? 'magnet' :
+                       r < bomberChance + magnetChance + 0.15 ? 'dodger' :
+                       r < bomberChance + magnetChance + 0.4 ? 'chaser' : 'basic';
           this.spawnEnemy(type);
         }
       }
@@ -901,7 +922,7 @@ export class GameSystem extends createSystem({}) {
         continue;
       }
 
-      const speed = (e.type === 'chaser' ? 4 : e.type === 'dodger' ? 5 : e.type === 'bomber' ? 3.5 : e.type === 'boss' ? 2.5 : 3) * diffMult;
+      const speed = (e.type === 'chaser' ? 4 : e.type === 'dodger' ? 5 : e.type === 'bomber' ? 3.5 : e.type === 'magnet' ? 3 : e.type === 'boss' ? 2.5 : 3) * diffMult;
 
       if (e.balloons > 0) {
         // Flying AI
@@ -945,6 +966,26 @@ export class GameSystem extends createSystem({}) {
             // Drop bomb when roughly above player
             if (Math.abs(dx) < 2 && e.y > state.playerY + 1 && Math.random() < 0.4) {
               this.bomberDropBomb(e);
+            }
+          } else if (e.type === 'magnet') {
+            // Magnet: maintains distance, pulls player toward it
+            const dx = state.playerX - e.x;
+            const dy = state.playerY - e.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            // Try to keep 4-6 units from player
+            if (dist < 3) {
+              e.vx -= Math.sign(dx) * speed * 0.3; // move away if too close
+            } else if (dist > 7) {
+              e.vx += Math.sign(dx) * speed * 0.2; // approach if too far
+            }
+            // Stay at medium height
+            if (e.y < 5) e.vy += 2;
+            if (e.y > 12) e.vy -= 1;
+            // Gravity pull effect on player
+            if (dist < 6 && dist > 0.5 && state.playerAlive && state.playerInvincible <= 0) {
+              const pullStr = (3 + (state.difficulty === 'hard' ? 2 : 0)) * (1 - dist / 6);
+              state.playerVX -= (dx / dist) * pullStr * 0.016;
+              state.playerVY -= (dy / dist) * pullStr * 0.016;
             }
           } else if (e.type === 'boss') {
             // Boss: slow chase with periodic lunges
@@ -1034,6 +1075,31 @@ export class GameSystem extends createSystem({}) {
         e.mesh.position.set(e.x, e.y, e.z);
         (e.mesh as Group).rotation.y = e.vx > 0 ? 0 : Math.PI;
 
+        // Magnet enemy: orbit ring rotation + pull particle trail
+        if (e.type === 'magnet' && !frozen) {
+          // Rotate the orbit rings (children 1 and 2 of the group)
+          const children = (e.mesh as Group).children;
+          for (let c = 0; c < children.length; c++) {
+            const child = children[c];
+            if (child instanceof Mesh && child.geometry?.type === 'TorusGeometry') {
+              child.rotation.z = time * 3 + c * Math.PI;
+            }
+          }
+          // Periodic pull particle toward player
+          if (state.playerAlive && Math.random() < 0.15) {
+            const dx = state.playerX - e.x;
+            const dy = state.playerY - e.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 6 && dist > 1) {
+              this.spawnParticle(
+                e.x + (Math.random() - 0.5), e.y + (Math.random() - 0.5), 0,
+                dx / dist * 2, dy / dist * 2, 0,
+                0.3, 0x4488ff, 0.03,
+              );
+            }
+          }
+        }
+
         // Balloon bob
         for (let i = 0; i < e.balloonMeshes.length; i++) {
           const bm = e.balloonMeshes[i];
@@ -1051,7 +1117,7 @@ export class GameSystem extends createSystem({}) {
     state.phaseEnemiesDefeated++;
     state.addCombo();
 
-    const points = e.type === 'boss' ? 2000 : e.type === 'chaser' ? 500 : e.type === 'dodger' ? 300 : 200;
+    const points = e.type === 'boss' ? 2000 : e.type === 'magnet' ? 600 : e.type === 'chaser' ? 500 : e.type === 'dodger' ? 300 : 200;
     state.addScore(points);
 
     // Spawn score drop
