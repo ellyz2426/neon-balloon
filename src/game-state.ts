@@ -62,6 +62,10 @@ export interface PlatformData {
   speed: number; // horizontal speed (0 = static)
   originX: number;
   range: number; // how far it moves from origin
+  crumble: boolean; // whether this platform crumbles when stood on
+  crumbleTimer: number; // time remaining before crumble (starts at 2.0s)
+  crumbleState: 'solid' | 'shaking' | 'crumbled'; // current visual state
+  respawnTimer: number; // time until platform respawns after crumble
   mesh: import('@iwsdk/core').Object3D | null;
 }
 

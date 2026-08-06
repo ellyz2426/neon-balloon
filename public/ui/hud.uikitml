@@ -7,8 +7,8 @@
     border-radius: 10;
     border-color: rgba(0, 200, 255, 0.4);
     border-width: 1;
-    width: 300;
-    height: 145;
+    width: 310;
+    height: 155;
   }
   .top-row {
     flex-direction: row;
@@ -53,6 +53,10 @@
     font-size: 16;
     color: #76ff03;
   }
+  .multiplier-text {
+    font-size: 13;
+    color: rgba(255, 200, 0, 0.9);
+  }
   .powerup-text {
     font-size: 12;
     color: #e040fb;
@@ -87,6 +91,7 @@
   <div class="top-row">
     <div class="score-label">SCORE</div>
     <div class="score-value" id="score">0</div>
+    <div class="multiplier-text" id="multiplier"></div>
     <div class="phase-text" id="phase">PHASE 1</div>
   </div>
   <div class="mid-row">

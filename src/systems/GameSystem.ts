@@ -116,6 +116,13 @@ export class GameSystem extends createSystem({}) {
   private envDecorations: Object3D[] = [];
   private decorationsBuilt = false;
 
+  // Parallax nebulae layers
+  private nebulae: { mesh: Mesh; depth: number; baseX: number; baseY: number }[] = [];
+  
+  // Screen flash effect
+  private screenFlashMesh: Mesh | null = null;
+  private screenFlashTimer = 0;
+
   // Input state
   private keysDown = new Set<string>();
   private flapPressed = false;
@@ -161,6 +168,8 @@ export class GameSystem extends createSystem({}) {
     this.buildShieldBubble();
     this.buildEnvironment();
     this.buildComboFlash();
+    this.buildNebulae();
+    this.buildScreenFlash();
     this.setupInput();
   }
 
@@ -422,6 +431,8 @@ export class GameSystem extends createSystem({}) {
     this.updateShieldBubble(time);
     this.updateEnvironmentDecorations(time);
     this.updateComboFlash(dt);
+    this.updateNebulae(time);
+    this.updateScreenFlash(dt);
 
     if (state.mode === 'balloon-trip') {
       this.updateBalloonTrip(dt);
@@ -574,6 +585,9 @@ export class GameSystem extends createSystem({}) {
   private playerPlatformCollision(): void {
     if (state.playerVY > 0) return;
     for (const plat of state.platforms) {
+      // Skip crumbled platforms
+      if (plat.crumble && plat.crumbleState === 'crumbled') continue;
+
       const px = plat.x;
       const py = plat.y;
       const hw = plat.width / 2;
@@ -585,6 +599,13 @@ export class GameSystem extends createSystem({}) {
         // Carry player with moving platform
         if (plat.speed !== 0) {
           state.playerVX += plat.speed * 0.8;
+        }
+        // Landing particles
+        this.spawnParticle(state.playerX - 0.2, py + 0.15, 0, -0.5, 0.3, 0, 0.25, 0x888888, 0.04);
+        this.spawnParticle(state.playerX + 0.2, py + 0.15, 0, 0.5, 0.3, 0, 0.25, 0x888888, 0.04);
+        // Trigger crumble on landing
+        if (plat.crumble && plat.crumbleState === 'solid') {
+          plat.crumbleState = 'shaking';
         }
       }
     }
@@ -965,6 +986,7 @@ export class GameSystem extends createSystem({}) {
 
         // Check platform landing
         for (const plat of state.platforms) {
+          if (plat.crumble && plat.crumbleState === 'crumbled') continue;
           const hw = plat.width / 2;
           if (e.x > plat.x - hw && e.x < plat.x + hw
               && e.y > plat.y && e.y < plat.y + 0.6
@@ -1190,22 +1212,30 @@ export class GameSystem extends createSystem({}) {
       const x = (Math.random() - 0.5) * (ARENA.WIDTH - w);
       const y = 1 + (i / count) * (ARENA.HEIGHT - 4);
 
+      const isMoving = i > 1 && Math.random() < 0.3 + state.currentPhase * 0.05;
+      const isCrumble = !isMoving && state.currentPhase >= 3 && Math.random() < 0.25 + state.currentPhase * 0.02;
       const plat: PlatformData = {
         id: state.getId(),
         x, y, z: 0,
         width: w,
-        speed: (i > 1 && Math.random() < 0.3 + state.currentPhase * 0.05) ?
+        speed: isMoving ?
           (Math.random() > 0.5 ? 1 : -1) * (1 + Math.random() * 1.5) : 0,
         originX: x,
         range: 2 + Math.random() * 3,
+        crumble: isCrumble,
+        crumbleTimer: 2.0,
+        crumbleState: 'solid',
+        respawnTimer: 0,
         mesh: null,
       };
 
       // Create mesh
       const tc = state.getThemeColors();
+      const platColor = plat.crumble ? 0x332211 : 0x112233;
+      const platEmissive = plat.crumble ? new Color(0xff8844) : new Color(tc.primary);
       const mat = new MeshStandardMaterial({
-        color: 0x112233,
-        emissive: new Color(tc.primary),
+        color: platColor,
+        emissive: platEmissive,
         emissiveIntensity: 0.2 + Math.random() * 0.2,
       });
       const mesh = new Mesh(new BoxGeometry(w, 0.25, 1.5), mat);
@@ -1214,8 +1244,9 @@ export class GameSystem extends createSystem({}) {
       plat.mesh = mesh;
 
       // Edge glow
+      const edgeEmissive = plat.crumble ? new Color(0xff6622) : new Color(tc.accent);
       const edgeMat = new MeshStandardMaterial({
-        color: 0x000000, emissive: new Color(tc.accent),
+        color: 0x000000, emissive: edgeEmissive,
         emissiveIntensity: 0.6,
         transparent: true, opacity: 0.8,
       });
@@ -1231,6 +1262,23 @@ export class GameSystem extends createSystem({}) {
 
   private updatePlatforms(dt: number, time: number): void {
     for (const p of state.platforms) {
+      // Crumbled platform respawn logic
+      if (p.crumble && p.crumbleState === 'crumbled') {
+        p.respawnTimer -= dt;
+        if (p.respawnTimer <= 0) {
+          p.crumbleState = 'solid';
+          p.crumbleTimer = 2.0;
+          if (p.mesh) {
+            p.mesh.visible = true;
+            p.mesh.scale.set(1, 1, 1);
+            p.mesh.position.y = p.y;
+            // Respawn sparkle
+            this.spawnBurst(p.x, p.y, 0xff8844, 6);
+          }
+        }
+        continue;
+      }
+
       // Moving platform logic
       if (p.speed !== 0) {
         p.x += p.speed * dt;
@@ -1244,7 +1292,32 @@ export class GameSystem extends createSystem({}) {
         }
       }
 
-      if (p.mesh) {
+      // Crumble platform shaking/collapsing
+      if (p.crumble && p.crumbleState === 'shaking') {
+        p.crumbleTimer -= dt;
+        if (p.mesh) {
+          // Shake effect
+          const shakeAmt = 0.03 * (1 - p.crumbleTimer / 2.0);
+          p.mesh.position.x = p.x + (Math.random() - 0.5) * shakeAmt;
+          p.mesh.position.y = p.y + (Math.random() - 0.5) * shakeAmt;
+          // Blink opacity
+          const mat = (p.mesh as Mesh).material as MeshStandardMaterial;
+          mat.opacity = 0.5 + Math.sin(time * 20) * 0.3;
+          mat.transparent = true;
+        }
+        if (p.crumbleTimer <= 0) {
+          // Crumble!
+          p.crumbleState = 'crumbled';
+          p.respawnTimer = 5 + Math.random() * 3; // Respawn after 5-8 seconds
+          if (p.mesh) {
+            p.mesh.visible = false;
+          }
+          this.spawnBurst(p.x, p.y, 0xff6622, 10);
+          this.audio?.playIcicle(); // Reuse crumble-like sound
+        }
+      }
+
+      if (p.mesh && p.crumbleState !== 'crumbled') {
         p.mesh.position.x = p.x;
         // Subtle glow animation
         const mat = (p.mesh as Mesh).material as MeshStandardMaterial;
@@ -1253,6 +1326,11 @@ export class GameSystem extends createSystem({}) {
         // Moving platform indicator: brighter glow
         if (p.speed !== 0) {
           mat.emissiveIntensity += 0.1;
+        }
+
+        // Crumble platform warning glow
+        if (p.crumble && p.crumbleState === 'solid') {
+          mat.emissiveIntensity += Math.sin(time * 1.5) * 0.05;
         }
       }
     }
@@ -2555,6 +2633,7 @@ export class GameSystem extends createSystem({}) {
       state.phaseTransitionTimer = 3;
       state.addScore(state.currentPhase * 500);
       this.audio?.playPhaseComplete();
+      this.triggerScreenFlash(0x00ffff, 0.4);
     }
   }
 
@@ -3229,6 +3308,92 @@ export class GameSystem extends createSystem({}) {
     // Spawn warning splash
     this.spawnBurst(x, ARENA.WATER_Y + 0.3, 0x2266aa, 10);
     this.audio?.playWhirlpool();
+  }
+
+  // === PARALLAX NEBULAE ===
+
+  private buildNebulae(): void {
+    const nebulaColors = [0x330066, 0x003366, 0x330033, 0x003333, 0x332200];
+    for (let i = 0; i < 5; i++) {
+      const depth = -12 - i * 4;
+      const scale = 4 + Math.random() * 6;
+      const mat = new MeshStandardMaterial({
+        color: 0x000000,
+        emissive: new Color(nebulaColors[i % nebulaColors.length]),
+        emissiveIntensity: 0.12 + Math.random() * 0.08,
+        transparent: true,
+        opacity: 0.08 + Math.random() * 0.06,
+        side: DoubleSide,
+      });
+      const mesh = new Mesh(new SphereGeometry(scale, 8, 6), mat);
+      const baseX = (Math.random() - 0.5) * 30;
+      const baseY = 5 + Math.random() * 10;
+      mesh.position.set(baseX, baseY, depth);
+      mesh.scale.set(1.5 + Math.random(), 0.8 + Math.random() * 0.4, 1);
+      this.world.scene.add(mesh);
+      this.nebulae.push({ mesh, depth, baseX, baseY });
+    }
+  }
+
+  private updateNebulae(time: number): void {
+    for (const n of this.nebulae) {
+      // Subtle parallax drift based on camera position
+      const cam = this.world.camera;
+      const parallaxFactor = 0.05 * (-n.depth / 20);
+      n.mesh.position.x = n.baseX + cam.position.x * parallaxFactor + Math.sin(time * 0.2 + n.depth) * 0.5;
+      n.mesh.position.y = n.baseY + cam.position.y * parallaxFactor * 0.5;
+      // Gentle pulsing
+      const mat = n.mesh.material as MeshStandardMaterial;
+      mat.emissiveIntensity = 0.1 + Math.sin(time * 0.5 + n.depth * 0.3) * 0.04;
+    }
+  }
+
+  // === SCREEN FLASH EFFECT ===
+
+  private buildScreenFlash(): void {
+    const mat = new MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: NEON_WHITE,
+      emissiveIntensity: 1,
+      transparent: true,
+      opacity: 0,
+      side: DoubleSide,
+      depthTest: false,
+    });
+    this.screenFlashMesh = new Mesh(new PlaneGeometry(50, 50), mat);
+    this.screenFlashMesh.renderOrder = 999;
+    this.screenFlashMesh.position.set(0, 8, 16);
+    this.screenFlashMesh.visible = false;
+    this.world.scene.add(this.screenFlashMesh);
+  }
+
+  triggerScreenFlash(color: number = 0xffffff, duration: number = 0.3): void {
+    this.screenFlashTimer = duration;
+    if (this.screenFlashMesh) {
+      const mat = this.screenFlashMesh.material as MeshStandardMaterial;
+      mat.color.setHex(color);
+      mat.emissive.setHex(color);
+      mat.opacity = 0.35;
+      this.screenFlashMesh.visible = true;
+    }
+  }
+
+  private updateScreenFlash(dt: number): void {
+    if (this.screenFlashTimer > 0) {
+      this.screenFlashTimer -= dt;
+      if (this.screenFlashMesh) {
+        const mat = this.screenFlashMesh.material as MeshStandardMaterial;
+        mat.opacity = Math.max(0, this.screenFlashTimer / 0.3 * 0.35);
+        this.screenFlashMesh.position.set(
+          this.world.camera.position.x,
+          this.world.camera.position.y,
+          this.world.camera.position.z - 2,
+        );
+        if (this.screenFlashTimer <= 0) {
+          this.screenFlashMesh.visible = false;
+        }
+      }
+    }
   }
 
   // === PUBLIC METHODS (for UISystem) ===

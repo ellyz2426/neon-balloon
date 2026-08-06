@@ -225,6 +225,16 @@ export class UISystem extends createSystem({}) {
       text: `${'●'.repeat(state.playerBalloons)}`,
     });
 
+    // Score multiplier display
+    const multiplier = 1 + Math.floor(state.combo / 3) * 0.5;
+    if (multiplier > 1) {
+      this.hudPanel.getElementById('multiplier')?.setProperties({
+        text: `×${multiplier.toFixed(1)}`,
+      });
+    } else {
+      this.hudPanel.getElementById('multiplier')?.setProperties({ text: '' });
+    }
+
     // Combo / freeze display
     if (state.freezeTimer > 0) {
       this.hudPanel.getElementById('combo')?.setProperties({
