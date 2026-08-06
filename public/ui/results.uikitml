@@ -76,6 +76,7 @@
   <div class="heading" id="result-title">PHASE COMPLETE</div>
   <div class="subheading" id="result-subtitle">Phase 1 Clear</div>
   <div class="score-big" id="result-score">0</div>
+  <div class="subheading" id="result-mode"></div>
   <div class="divider"></div>
   <div class="stat-row">
     <div class="stat-label">Enemies Defeated</div>

@@ -325,6 +325,14 @@ export class UISystem extends createSystem({}) {
     const mins = Math.floor(state.gameTime / 60);
     const secs = Math.floor(state.gameTime % 60);
 
+    // Mode and difficulty label
+    const modeLabels: Record<string, string> = {
+      'arcade': 'ARCADE', 'survival': 'SURVIVAL', 'balloon-trip': 'BALLOON TRIP',
+    };
+    this.resultsPanel.getElementById('result-mode')?.setProperties({
+      text: `${modeLabels[state.mode] || 'ARCADE'} • ${state.difficulty.toUpperCase()}`,
+    });
+
     if (state.phase === 'game-over') {
       this.resultsPanel.getElementById('result-title')?.setProperties({ text: 'GAME OVER' });
       this.resultsPanel.getElementById('result-subtitle')?.setProperties({ text: `Reached Phase ${state.currentPhase}` });

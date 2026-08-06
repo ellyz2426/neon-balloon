@@ -648,11 +648,26 @@ export class GameSystem extends createSystem({}) {
                      type === 'chaser' ? 2 :
                      type === 'dodger' ? 1 : 2;
 
+    const spawnY = ARENA.PLAYER_START_Y + Math.random() * 6;
+    const spawnX = side * (ARENA.MAX_X + 1);
+
+    // Spawn warning indicator particles at entrance
+    const warningColor = type === 'boss' ? 0xff0000 :
+                         type === 'magnet' ? 0x4488ff :
+                         type === 'bomber' ? 0xff88ff : 0xff8844;
+    for (let i = 0; i < 4; i++) {
+      this.spawnParticle(
+        spawnX, spawnY + (i - 1.5) * 0.5, 0,
+        -side * 1.5, (Math.random() - 0.5) * 2, 0,
+        0.5, warningColor, 0.05,
+      );
+    }
+
     const enemy: EnemyData = {
       id: state.getId(),
       type,
-      x: side * (ARENA.MAX_X + 1),
-      y: ARENA.PLAYER_START_Y + Math.random() * 6,
+      x: spawnX,
+      y: spawnY,
       z: 0,
       vx: -side * (1 + Math.random()),
       vy: 0,
@@ -2873,6 +2888,23 @@ export class GameSystem extends createSystem({}) {
       if (scene.background instanceof Color) {
         scene.background.lerp(targetColor, dt * 0.5);
       }
+    }
+
+    // Ambient floating neon particles in background
+    if ((state.phase === 'playing' || state.phase === 'menu') && Math.random() < dt * 1.5) {
+      const ambientColors = [0x00ffff, 0xff00ff, 0x00ff88, 0xffff00, 0x4488ff];
+      const color = ambientColors[Math.floor(Math.random() * ambientColors.length)];
+      this.spawnParticle(
+        (Math.random() - 0.5) * ARENA.WIDTH * 1.5,
+        ARENA.WATER_Y + Math.random() * ARENA.HEIGHT,
+        -3 - Math.random() * 5,
+        (Math.random() - 0.5) * 0.5,
+        0.3 + Math.random() * 0.5,
+        0,
+        3 + Math.random() * 3,
+        color,
+        0.02 + Math.random() * 0.02,
+      );
     }
   }
 
