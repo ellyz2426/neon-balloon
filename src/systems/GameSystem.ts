@@ -157,6 +157,13 @@ export class GameSystem extends createSystem({}) {
   // Combo flash mesh
   private comboFlashMesh: Mesh | null = null;
 
+  // Coin magnet pull range visual
+  private magnetRangeMesh: Mesh | null = null;
+
+  // Phase announcement
+  private phaseAnnounceTimer = 0;
+  private phaseAnnounceText = '';
+
   // Platform generation tracking
   private platformsGenerated = false;
 
@@ -2408,6 +2415,34 @@ export class GameSystem extends createSystem({}) {
       mesh: group, x: xPos, gapY, gapH, scored: false,
     });
     this.tripSpawnX = xPos;
+
+    // Spawn bonus coins in the gap (Balloon Trip reward)
+    if (Math.random() < 0.6) {
+      const coinCount = 2 + Math.floor(Math.random() * 3);
+      for (let c = 0; c < coinCount; c++) {
+        const coinY = gapY + (c - coinCount / 2) * 0.8;
+        const coinItem: BonusItemData = {
+          id: state.getId(),
+          type: 'coin',
+          x: xPos + (Math.random() - 0.5) * 0.5,
+          y: coinY,
+          z: 0,
+          vy: 0,
+          points: 50,
+          collected: false,
+          mesh: null,
+        };
+        const coinMat = new MeshStandardMaterial({
+          color: 0xffcc00, emissive: NEON_YELLOW, emissiveIntensity: 0.7,
+        });
+        const coinMesh = new Mesh(new CylinderGeometry(0.12, 0.12, 0.03, 8), coinMat);
+        coinMesh.rotation.x = Math.PI / 2;
+        coinMesh.position.set(coinItem.x, coinItem.y, 0);
+        this.world.scene.add(coinMesh);
+        coinItem.mesh = coinMesh;
+        state.bonusItems.push(coinItem);
+      }
+    }
   }
 
   private updateBalloonTrip(dt: number): void {
@@ -2460,6 +2495,44 @@ export class GameSystem extends createSystem({}) {
 
     // Update HUD with trip distance
     state.currentPhase = Math.floor(state.tripDistance / 50) + 1;
+
+    // Scroll and collect trip coins (bonus items in Balloon Trip mode)
+    for (let i = state.bonusItems.length - 1; i >= 0; i--) {
+      const item = state.bonusItems[i];
+      if (item.collected) continue;
+
+      // Scroll with the world
+      item.x -= speed * dt;
+      if (item.mesh) {
+        item.mesh.position.x = item.x;
+        item.mesh.rotation.y += dt * 4; // Spin
+      }
+
+      // Player collection
+      const dx = state.playerX - item.x;
+      const dy = state.playerY - item.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 0.8) {
+        item.collected = true;
+        state.addScore(item.points);
+        this.spawnBurst(item.x, item.y, 0xffcc00, 4);
+        if (item.mesh) {
+          this.world.scene.remove(item.mesh);
+          item.mesh = null;
+        }
+        state.bonusItems.splice(i, 1);
+        continue;
+      }
+
+      // Remove off-screen
+      if (item.x < ARENA.MIN_X - 5) {
+        if (item.mesh) {
+          this.world.scene.remove(item.mesh);
+          item.mesh = null;
+        }
+        state.bonusItems.splice(i, 1);
+      }
+    }
   }
 
   private updateBossAttacks(dt: number): void {

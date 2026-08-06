@@ -281,6 +281,14 @@ export class UISystem extends createSystem({}) {
       this.hudPanel.getElementById('dash')?.setProperties({ text: 'DASH READY' });
     }
 
+    // Elapsed time
+    const elapsed = state.gameTime;
+    const eMin = Math.floor(elapsed / 60);
+    const eSec = Math.floor(elapsed % 60);
+    this.hudPanel.getElementById('elapsed')?.setProperties({
+      text: `${eMin}:${eSec.toString().padStart(2, '0')}`,
+    });
+
     // Enemies remaining / bonus items
     if (state.bonusPhaseActive) {
       this.hudPanel.getElementById('enemies')?.setProperties({
