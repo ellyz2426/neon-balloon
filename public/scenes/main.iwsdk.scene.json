@@ -1,0 +1,81 @@
+{
+  "version": "iwsdk.scene.v1",
+  "units": "meters",
+  "components": {
+    "com.iwsdk.components.DomeGradient": {
+      "sky": [0.01, 0.01, 0.05, 1],
+      "equator": [0.02, 0.01, 0.08, 1],
+      "ground": [0.0, 0.0, 0.03, 1],
+      "intensity": 0.4
+    },
+    "com.iwsdk.components.IBLGradient": {
+      "sky": [0.05, 0.05, 0.15, 1],
+      "equator": [0.03, 0.03, 0.1, 1],
+      "ground": [0.02, 0.02, 0.06, 1],
+      "intensity": 0.5
+    }
+  },
+  "resources": {},
+  "nodes": [
+    {
+      "id": "menu-panel",
+      "name": "Menu Panel",
+      "content": { "type": "asset", "asset": "menu-panel" },
+      "transform": { "position": [0, 6, -4], "scale": 0.5 },
+      "components": {
+        "RayInteractable": {},
+        "ScreenSpace": { "top": "50%", "left": "50%", "width": "30vw", "height": "70vh" }
+      }
+    },
+    {
+      "id": "hud-panel",
+      "name": "HUD Panel",
+      "content": { "type": "asset", "asset": "hud-panel" },
+      "transform": { "position": [0, 10, -3], "scale": 0.35 },
+      "components": {
+        "RayInteractable": {},
+        "ScreenSpace": { "top": "10px", "left": "10px", "width": "28vw", "height": "14vh" }
+      }
+    },
+    {
+      "id": "pause-panel",
+      "name": "Pause Panel",
+      "content": { "type": "asset", "asset": "pause-panel" },
+      "transform": { "position": [0, 6, -3], "scale": 0.45 },
+      "components": {
+        "RayInteractable": {},
+        "ScreenSpace": { "top": "30%", "left": "50%", "width": "26vw", "height": "40vh" }
+      }
+    },
+    {
+      "id": "results-panel",
+      "name": "Results Panel",
+      "content": { "type": "asset", "asset": "results-panel" },
+      "transform": { "position": [0, 6, -3.5], "scale": 0.5 },
+      "components": {
+        "RayInteractable": {},
+        "ScreenSpace": { "top": "20%", "left": "50%", "width": "28vw", "height": "60vh" }
+      }
+    },
+    {
+      "id": "settings-panel",
+      "name": "Settings Panel",
+      "content": { "type": "asset", "asset": "settings-panel" },
+      "transform": { "position": [0, 6, -3.5], "scale": 0.45 },
+      "components": {
+        "RayInteractable": {},
+        "ScreenSpace": { "top": "25%", "left": "50%", "width": "28vw", "height": "55vh" }
+      }
+    },
+    {
+      "id": "stats-panel",
+      "name": "Stats Panel",
+      "content": { "type": "asset", "asset": "stats-panel" },
+      "transform": { "position": [0, 6, -3.5], "scale": 0.5 },
+      "components": {
+        "RayInteractable": {},
+        "ScreenSpace": { "top": "15%", "left": "50%", "width": "28vw", "height": "65vh" }
+      }
+    }
+  ]
+}

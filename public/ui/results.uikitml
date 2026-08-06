@@ -1,0 +1,106 @@
+<style>
+  .root {
+    flex-direction: column;
+    align-items: center;
+    padding: 28;
+    gap: 12;
+    background-color: rgba(0, 4, 16, 0.95);
+    border-radius: 14;
+    border-color: rgba(0, 200, 255, 0.5);
+    border-width: 2;
+    width: 400;
+    height: 440;
+  }
+  .heading {
+    font-size: 30;
+    color: #00e5ff;
+  }
+  .subheading {
+    font-size: 14;
+    color: rgba(255, 255, 255, 0.5);
+  }
+  .score-big {
+    font-size: 42;
+    color: #76ff03;
+  }
+  .stat-row {
+    flex-direction: row;
+    justify-content: space-between;
+    width: 300;
+    padding: 4;
+  }
+  .stat-label {
+    font-size: 14;
+    color: rgba(255, 255, 255, 0.6);
+  }
+  .stat-value {
+    font-size: 14;
+    color: #ffffff;
+  }
+  .divider {
+    width: 300;
+    height: 1;
+    background-color: rgba(0, 200, 255, 0.2);
+  }
+  .btn {
+    padding: 12;
+    background-color: rgba(0, 200, 255, 0.15);
+    border-radius: 8;
+    border-color: rgba(0, 200, 255, 0.4);
+    border-width: 1;
+    width: 260;
+    align-items: center;
+    cursor: pointer;
+    margin-top: 8;
+  }
+  .btn-text {
+    font-size: 18;
+    color: #ffffff;
+  }
+  .btn-secondary {
+    padding: 10;
+    background-color: rgba(255, 255, 255, 0.06);
+    border-radius: 6;
+    border-color: rgba(255, 255, 255, 0.15);
+    border-width: 1;
+    width: 260;
+    align-items: center;
+    cursor: pointer;
+  }
+  .btn-sec-text {
+    font-size: 15;
+    color: rgba(255, 255, 255, 0.7);
+  }
+</style>
+<Panel class="root">
+  <div class="heading" id="result-title">PHASE COMPLETE</div>
+  <div class="subheading" id="result-subtitle">Phase 1 Clear</div>
+  <div class="score-big" id="result-score">0</div>
+  <div class="divider"></div>
+  <div class="stat-row">
+    <div class="stat-label">Enemies Defeated</div>
+    <div class="stat-value" id="result-enemies">0</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Balloons Popped</div>
+    <div class="stat-value" id="result-balloons">0</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Best Combo</div>
+    <div class="stat-value" id="result-combo">0</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Fish Caught</div>
+    <div class="stat-value" id="result-fish">0</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Time</div>
+    <div class="stat-value" id="result-time">0:00</div>
+  </div>
+  <div class="btn" id="btn-continue">
+    <div class="btn-text" id="btn-continue-text">NEXT PHASE</div>
+  </div>
+  <div class="btn-secondary" id="btn-menu">
+    <div class="btn-sec-text">MAIN MENU</div>
+  </div>
+</Panel>
