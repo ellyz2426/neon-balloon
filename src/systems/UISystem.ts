@@ -225,8 +225,12 @@ export class UISystem extends createSystem({}) {
       text: `${'●'.repeat(state.playerBalloons)}`,
     });
 
-    // Combo display
-    if (state.combo > 1) {
+    // Combo / freeze display
+    if (state.freezeTimer > 0) {
+      this.hudPanel.getElementById('combo')?.setProperties({
+        text: `❄ FREEZE ${Math.ceil(state.freezeTimer)}s`,
+      });
+    } else if (state.combo > 1) {
       this.hudPanel.getElementById('combo')?.setProperties({
         text: `x${state.combo} COMBO`,
       });
@@ -252,7 +256,7 @@ export class UISystem extends createSystem({}) {
     const puText = state.activePowerUps.map(p => {
       const icons: Record<string, string> = {
         'shield': 'SHIELD', 'speed': 'SPEED', 'lightning-immunity': 'IMMUNE',
-        'magnet': 'MAGNET', 'extra-balloon': 'EXTRA',
+        'magnet': 'MAGNET', 'extra-balloon': 'EXTRA', 'freeze': 'FREEZE',
       };
       return `${icons[p.type] || p.type} ${Math.ceil(p.remaining)}s`;
     }).join(' | ');

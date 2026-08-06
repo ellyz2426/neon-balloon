@@ -33,7 +33,9 @@ import {
   type EnemyData, type PowerUpData, type PlatformData,
   type FishData, type LightningData, type PowerUpType,
   type IcicleData, type WindZoneData, type BonusItemData,
+  type ScoreDropData,
 } from '../game-state.js';
+import { AudioSystem } from './AudioSystem.js';
 
 // Reusable geometry
 const sphereGeo = new SphereGeometry(0.5, 12, 8);
@@ -133,10 +135,17 @@ export class GameSystem extends createSystem({}) {
   private bonusSpawnCount = 0;
   private powerUpSpawnTimer = 0;
 
+  // Audio reference
+  private audio: AudioSystem | null = null;
+
+  // Score drops
+  private scoreDrops: ScoreDropData[] = [];
+
   // Platform generation tracking
   private platformsGenerated = false;
 
   init(): void {
+    this.audio = this.world.getSystem(AudioSystem) ?? null;
     this.buildArena();
     this.buildPlayer();
     this.buildClouds();
@@ -361,6 +370,7 @@ export class GameSystem extends createSystem({}) {
 
     if (state.phase === 'playing') {
       state.gameTime += dt;
+      this.updateFreeze(dt);
       this.updatePlayer(sDt, time);
       this.updateEnemies(sDt, time);
       this.updateCollisions(sDt);
@@ -376,6 +386,7 @@ export class GameSystem extends createSystem({}) {
       this.updatePhaseTimer(sDt);
       this.updateTrail(sDt);
       this.updateBonusItems(sDt, time);
+      this.updateScoreDrops(sDt, time);
       this.checkPhaseComplete();
       this.handleXRInput(sDt);
     }
@@ -539,6 +550,7 @@ export class GameSystem extends createSystem({}) {
   private animateFlap(): void {
     // Simple flap particle
     this.spawnParticle(state.playerX, state.playerY - 0.3, 0, 0, -1, 0, 0.3, 0x88ccff, 0.15);
+    this.audio?.playFlap();
   }
 
   private playerPlatformCollision(): void {
@@ -566,6 +578,7 @@ export class GameSystem extends createSystem({}) {
     this.spawnBurst(state.playerX, state.playerY, 0xff4444, 15);
     state.shakeTimer = 0.3;
     state.shakeIntensity = 0.3;
+    this.audio?.playDeath();
 
     if (state.lives <= 0) {
       state.phase = 'game-over';
@@ -789,8 +802,9 @@ export class GameSystem extends createSystem({}) {
 
   private updateEnemies(dt: number, time: number): void {
     const diffMult = state.getDifficultyMultiplier();
+    const frozen = state.freezeTimer > 0;
 
-    // Spawn queue
+    // Spawn queue (still spawns during freeze)
     if (this.enemySpawnQueue > 0) {
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) {
@@ -802,6 +816,21 @@ export class GameSystem extends createSystem({}) {
           state.bossActive = true;
           state.bossMaxHP = 4;
           state.bossCurrentHP = 4;
+          // Boss entrance: dramatic effects
+          state.shakeTimer = 0.5;
+          state.shakeIntensity = 0.25;
+          state.slowMoTimer = 0.4;
+          state.slowMoFactor = 0.5;
+          this.audio?.playBossAttack();
+          // Spawn warning particles around arena
+          for (let i = 0; i < 24; i++) {
+            const angle = (i / 24) * Math.PI * 2;
+            this.spawnParticle(
+              Math.cos(angle) * 6, 8 + Math.sin(angle) * 5, 0,
+              -Math.cos(angle) * 2, -Math.sin(angle) * 2, 0,
+              1.2, 0xff4444, 0.1,
+            );
+          }
         } else {
           const r = Math.random();
           // Bomber appears from Phase 4+, more likely on Hard
@@ -817,6 +846,15 @@ export class GameSystem extends createSystem({}) {
 
     for (const e of state.enemies) {
       if (!e.alive) continue;
+
+      // Frozen: enemies don't move, just tint blue
+      if (frozen) {
+        if (e.mesh) {
+          const s = 1 + Math.sin(time * 8) * 0.03;
+          e.mesh.scale.set(s, s, s);
+        }
+        continue;
+      }
 
       const speed = (e.type === 'chaser' ? 4 : e.type === 'dodger' ? 5 : e.type === 'bomber' ? 3.5 : e.type === 'boss' ? 2.5 : 3) * diffMult;
 
@@ -970,6 +1008,9 @@ export class GameSystem extends createSystem({}) {
     const points = e.type === 'boss' ? 2000 : e.type === 'chaser' ? 500 : e.type === 'dodger' ? 300 : 200;
     state.addScore(points);
 
+    // Spawn score drop
+    this.spawnScoreDrop(e.x, e.y, e.type === 'boss' ? 200 : 50);
+
     if (e.type === 'boss') {
       state.bossActive = false;
       state.sessionBossesDefeated++;
@@ -978,6 +1019,7 @@ export class GameSystem extends createSystem({}) {
       state.shakeTimer = 0.5;
       state.shakeIntensity = 0.5;
       this.spawnBurst(e.x, e.y, 0xffff00, 30);
+      this.audio?.playBossDefeat();
       // Victory confetti
       for (let i = 0; i < 20; i++) {
         const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff];
@@ -995,6 +1037,7 @@ export class GameSystem extends createSystem({}) {
       }
     } else {
       this.spawnBurst(e.x, e.y, 0xff8844, 10);
+      this.audio?.playEnemyDefeat();
     }
 
     // Score popup particle (larger, slower fade)
@@ -1027,6 +1070,7 @@ export class GameSystem extends createSystem({}) {
           // Player above enemy — pop balloon
           this.popEnemyBalloon(e);
           state.playerVY = 4; // Bounce up
+          this.audio?.playPop();
         } else if (dy < -0.2 && state.playerInvincible <= 0) {
           // Enemy above player — player loses balloon
           this.popPlayerBalloon();
@@ -1058,6 +1102,7 @@ export class GameSystem extends createSystem({}) {
     state.sessionBalloonsPopped++;
     state.addScore(100);
     state.addCombo();
+    this.audio?.playPop();
 
     // Track boss HP
     if (e.type === 'boss') {
@@ -1087,6 +1132,7 @@ export class GameSystem extends createSystem({}) {
       state.activePowerUps.splice(shieldIdx, 1);
       state.playerInvincible = 1;
       this.spawnBurst(state.playerX, state.playerY, 0x00ffff, 12);
+      this.audio?.playShieldBreak();
       return;
     }
 
@@ -1095,6 +1141,7 @@ export class GameSystem extends createSystem({}) {
     this.createPlayerBalloons();
     state.shakeTimer = 0.2;
     state.shakeIntensity = 0.2;
+    this.audio?.playHurt();
 
     if (state.playerBalloons <= 0) {
       this.playerDie();
@@ -1230,6 +1277,7 @@ export class GameSystem extends createSystem({}) {
           state.sessionFishCaught++;
           state.addCombo();
           this.spawnBurst(f.x, f.y, 0x00ff88, 8);
+          this.audio?.playFishCatch();
         } else {
           // Magnet pull
           f.x += Math.sign(dx) * 3 * dt;
@@ -1331,6 +1379,7 @@ export class GameSystem extends createSystem({}) {
             this.popPlayerBalloon();
             state.shakeTimer = 0.3;
             state.shakeIntensity = 0.4;
+            this.audio?.playLightning();
           }
         }
       }
@@ -1428,7 +1477,7 @@ export class GameSystem extends createSystem({}) {
   }
 
   private spawnPowerUp(): void {
-    const types: PowerUpType[] = ['shield', 'speed', 'extra-balloon', 'lightning-immunity', 'magnet'];
+    const types: PowerUpType[] = ['shield', 'speed', 'extra-balloon', 'lightning-immunity', 'magnet', 'freeze'];
     const type = types[Math.floor(Math.random() * types.length)];
     const x = (Math.random() - 0.5) * ARENA.WIDTH * 0.7;
     const y = 3 + Math.random() * (ARENA.HEIGHT - 6);
@@ -1449,6 +1498,7 @@ export class GameSystem extends createSystem({}) {
       'extra-balloon': 0xff88ff,
       'lightning-immunity': 0x44ff44,
       'magnet': 0xff8844,
+      'freeze': 0x88ddff,
     };
     const c = colors[type];
     const mat = new MeshStandardMaterial({
@@ -1497,7 +1547,7 @@ export class GameSystem extends createSystem({}) {
       indicator = new Mesh(new BoxGeometry(0.12, 0.12, 0.12), indicatorMat);
       indicator.rotation.z = Math.PI / 4;
     } else {
-      // Magnet: wide flat cylinder
+      // Magnet or freeze: wide flat cylinder
       indicator = new Mesh(new CylinderGeometry(0.1, 0.1, 0.06, 8), indicatorMat);
     }
     indicator.position.set(0, 0.7, 0);
@@ -1513,6 +1563,7 @@ export class GameSystem extends createSystem({}) {
     p.collected = true;
     state.sessionPowerUps++;
     state.addScore(150);
+    this.audio?.playPowerUp();
 
     if (p.type === 'extra-balloon' && state.playerBalloons < 3) {
       state.playerBalloons++;
@@ -1520,6 +1571,16 @@ export class GameSystem extends createSystem({}) {
         state.playerMaxBalloons = state.playerBalloons;
       }
       this.createPlayerBalloons();
+    } else if (p.type === 'freeze') {
+      // Freeze all enemies for 3 seconds
+      state.freezeTimer = 3;
+      this.spawnBurst(state.playerX, state.playerY, 0x88ddff, 20);
+      // Visual freeze flash on all enemies
+      for (const e of state.enemies) {
+        if (e.alive && e.mesh) {
+          this.spawnBurst(e.x, e.y, 0x88ddff, 6);
+        }
+      }
     } else {
       // Timed power-up
       const duration = p.type === 'shield' ? 15 : 8;
@@ -1849,6 +1910,7 @@ export class GameSystem extends createSystem({}) {
           this.spawnBurst(ice.x, ice.y, 0x88ccff, 8);
           state.shakeTimer = 0.15;
           state.shakeIntensity = 0.15;
+          this.audio?.playIcicle();
           continue;
         }
       }
@@ -2260,6 +2322,7 @@ export class GameSystem extends createSystem({}) {
   }
 
   private bossLightningCall(boss: EnemyData): void {
+    this.audio?.playBossAttack();
     // Spawn a lightning bolt aimed at the player's current X
     const l: LightningData = {
       id: state.getId(),
@@ -2299,6 +2362,7 @@ export class GameSystem extends createSystem({}) {
   }
 
   private bossShockwave(boss: EnemyData): void {
+    this.audio?.playBossAttack();
     // Push player away from boss
     const dx = state.playerX - boss.x;
     const dy = state.playerY - boss.y;
@@ -2458,6 +2522,7 @@ export class GameSystem extends createSystem({}) {
       state.phase = 'phase-complete';
       state.phaseTransitionTimer = 3;
       state.addScore(state.currentPhase * 500);
+      this.audio?.playPhaseComplete();
     }
   }
 
@@ -2499,6 +2564,12 @@ export class GameSystem extends createSystem({}) {
     }
     state.bonusItems = [];
     state.bonusPhaseActive = false;
+    // Clean score drops
+    for (const d of state.scoreDrops) {
+      if (d.mesh) this.world.scene.remove(d.mesh);
+    }
+    state.scoreDrops = [];
+    state.freezeTimer = 0;
 
     this.generatePlatforms();
 
@@ -2529,6 +2600,23 @@ export class GameSystem extends createSystem({}) {
       const mat = this.waterPlane.material as MeshStandardMaterial;
       mat.emissiveIntensity = 0.4 + Math.sin(time * 2) * 0.1;
     }
+
+    // Phase-based background color evolution
+    const scene = this.world.scene;
+    if (state.phase === 'playing' || state.phase === 'phase-complete') {
+      const phaseGroup = Math.floor((state.currentPhase - 1) / 5);
+      const bgColors = [
+        0x000411, // Phase 1-5: deep midnight blue
+        0x110411, // Phase 6-10: dark purple
+        0x041104, // Phase 11-15: deep forest
+        0x110800, // Phase 16-20: warm dark
+        0x040411, // Phase 21+: deep indigo
+      ];
+      const targetColor = new Color(bgColors[phaseGroup % bgColors.length]);
+      if (scene.background instanceof Color) {
+        scene.background.lerp(targetColor, dt * 0.5);
+      }
+    }
   }
 
   // === XR INPUT ===
@@ -2539,6 +2627,14 @@ export class GameSystem extends createSystem({}) {
 
     const right = xr.gamepads?.right;
     const left = xr.gamepads?.left;
+
+    // Grip button for pause (either hand)
+    if (right?.getButtonDown?.('xr-standard-squeeze') || left?.getButtonDown?.('xr-standard-squeeze')) {
+      if (state.phase === 'playing') {
+        state.phase = 'paused';
+        return;
+      }
+    }
 
     if (right) {
       // Trigger = flap
@@ -2602,6 +2698,7 @@ export class GameSystem extends createSystem({}) {
   }
 
   private waterSplash(x: number): void {
+    this.audio?.playSplash();
     // Upward splash particles
     for (let i = 0; i < 12; i++) {
       const angle = Math.PI * 0.1 + (i / 12) * Math.PI * 0.8; // Upward arc
@@ -2683,6 +2780,89 @@ export class GameSystem extends createSystem({}) {
     }
   }
 
+  // === FREEZE MECHANIC ===
+
+  private updateFreeze(dt: number): void {
+    if (state.freezeTimer > 0) {
+      state.freezeTimer -= dt;
+      // Frozen enemies don't move — handled in updateEnemies by checking freezeTimer
+    }
+  }
+
+  // === SCORE DROPS ===
+
+  private spawnScoreDrop(x: number, y: number, points: number): void {
+    const drop: ScoreDropData = {
+      id: state.getId(), x, y, z: 0,
+      vy: 2 + Math.random() * 2,
+      points, collected: false,
+      timer: 5, mesh: null,
+    };
+
+    const mat = new MeshStandardMaterial({
+      color: 0xffcc00, emissive: NEON_YELLOW, emissiveIntensity: 0.8,
+      transparent: true, opacity: 0.9,
+    });
+    const mesh = new Mesh(new CylinderGeometry(0.12, 0.12, 0.04, 8), mat);
+    mesh.rotation.x = Math.PI / 2;
+    mesh.position.set(x, y, 0);
+    this.world.scene.add(mesh);
+    drop.mesh = mesh;
+    state.scoreDrops.push(drop);
+  }
+
+  private updateScoreDrops(dt: number, time: number): void {
+    for (let i = state.scoreDrops.length - 1; i >= 0; i--) {
+      const d = state.scoreDrops[i];
+      if (d.collected) continue;
+
+      d.timer -= dt;
+      if (d.timer <= 0) {
+        if (d.mesh) { this.world.scene.remove(d.mesh); d.mesh = null; }
+        state.scoreDrops.splice(i, 1);
+        continue;
+      }
+
+      // Float up briefly then drift down
+      d.vy -= 6 * dt;
+      d.y += d.vy * dt;
+
+      // Collect on contact
+      const dx = state.playerX - d.x;
+      const dy = state.playerY - d.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const hasMagnet = state.activePowerUps.some(p => p.type === 'magnet');
+      if (hasMagnet && dist < 3) {
+        d.x += dx * 3 * dt;
+      }
+      if (dist < 0.8) {
+        d.collected = true;
+        state.addScore(d.points);
+        this.spawnBurst(d.x, d.y, 0xffcc00, 4);
+        if (d.mesh) { this.world.scene.remove(d.mesh); d.mesh = null; }
+        state.scoreDrops.splice(i, 1);
+        continue;
+      }
+
+      // Hit water = gone
+      if (d.y < ARENA.WATER_Y + 0.3) {
+        if (d.mesh) { this.world.scene.remove(d.mesh); d.mesh = null; }
+        state.scoreDrops.splice(i, 1);
+        continue;
+      }
+
+      // Update mesh
+      if (d.mesh) {
+        d.mesh.position.set(d.x, d.y, d.z);
+        d.mesh.rotation.y = time * 5;
+        // Blink when about to expire
+        if (d.timer < 1.5) {
+          d.mesh.visible = Math.sin(d.timer * 15) > 0;
+        }
+      }
+    }
+  }
+
   // === CAMERA ===
 
   private updateCamera(dt: number): void {
@@ -2760,6 +2940,12 @@ export class GameSystem extends createSystem({}) {
       if (w.mesh) this.world.scene.remove(w.mesh);
     }
     state.windZones = [];
+    // Clean score drops
+    for (const d of state.scoreDrops) {
+      if (d.mesh) this.world.scene.remove(d.mesh);
+    }
+    state.scoreDrops = [];
+    state.freezeTimer = 0;
     // Clean trail
     for (const t of this.trailNodes) {
       this.world.scene.remove(t.mesh);

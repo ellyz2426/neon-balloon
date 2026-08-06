@@ -6,7 +6,7 @@
 export type GameMode = 'arcade' | 'balloon-trip' | 'survival';
 export type GamePhase = 'menu' | 'playing' | 'phase-complete' | 'game-over' | 'paused' | 'settings' | 'stats' | 'tutorial';
 export type EnemyType = 'basic' | 'chaser' | 'dodger' | 'boss' | 'bomber';
-export type PowerUpType = 'shield' | 'speed' | 'extra-balloon' | 'lightning-immunity' | 'magnet';
+export type PowerUpType = 'shield' | 'speed' | 'extra-balloon' | 'lightning-immunity' | 'magnet' | 'freeze';
 export type Difficulty = 'easy' | 'normal' | 'hard';
 export type ColorTheme = 'neon-cyan' | 'neon-pink' | 'neon-green' | 'neon-gold';
 
@@ -106,6 +106,18 @@ export interface BonusItemData {
   vy: number;
   points: number;
   collected: boolean;
+  mesh: import('@iwsdk/core').Object3D | null;
+}
+
+export interface ScoreDropData {
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+  vy: number;
+  points: number;
+  collected: boolean;
+  timer: number;
   mesh: import('@iwsdk/core').Object3D | null;
 }
 
@@ -248,6 +260,12 @@ class GameState {
   windZones: WindZoneData[] = [];
   bonusItems: BonusItemData[] = [];
 
+  // Score drops from defeated enemies
+  scoreDrops: ScoreDropData[] = [];
+
+  // Freeze state
+  freezeTimer = 0;
+
   // Bonus phase state
   bonusPhaseActive = false;
   bonusItemsCollected = 0;
@@ -344,6 +362,8 @@ class GameState {
     this.bonusPhaseActive = false;
     this.bonusItemsCollected = 0;
     this.bonusItemsTotal = 0;
+    this.scoreDrops = [];
+    this.freezeTimer = 0;
     this.phaseTransitionTimer = 0;
     this.shakeTimer = 0;
     this.slowMoTimer = 0;
