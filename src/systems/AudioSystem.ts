@@ -20,6 +20,9 @@ export class AudioSystem extends createSystem({}) {
   private readonly menuNotes = [261, 329, 392, 523, 392, 329, 261, 196];
   private readonly gameNotes = [330, 392, 440, 523, 587, 523, 440, 392, 330, 262];
   private readonly bossNotes = [196, 233, 262, 196, 175, 196, 233, 262];
+  private readonly bonusNotes = [523, 659, 784, 880, 784, 659, 523, 659, 784, 1047];
+
+  private lastPhase = '';
 
   init(): void {
     try {
@@ -43,11 +46,18 @@ export class AudioSystem extends createSystem({}) {
     this.musicGain.gain.value = state.musicVolume * 0.15;
     this.sfxGain.gain.value = state.sfxVolume;
 
+    // Play game-over fanfare once on transition
+    if (state.phase === 'game-over' && this.lastPhase !== 'game-over') {
+      this.playGameOver();
+    }
+    this.lastPhase = state.phase;
+
     if (state.phase === 'playing' || state.phase === 'menu') {
       this.musicTimer -= delta;
       if (this.musicTimer <= 0) {
         this.playMusicNote();
-        this.musicTimer = state.bossActive ? 0.18 : 0.3;
+        this.musicTimer = state.bossActive ? 0.18 :
+                          state.bonusPhaseActive ? 0.15 : 0.3;
       }
     }
   }
@@ -55,13 +65,15 @@ export class AudioSystem extends createSystem({}) {
   private playMusicNote(): void {
     if (!this.ctx || !this.musicGain) return;
     const notes = state.phase === 'menu' ? this.menuNotes :
-                  state.bossActive ? this.bossNotes : this.gameNotes;
+                  state.bossActive ? this.bossNotes :
+                  state.bonusPhaseActive ? this.bonusNotes : this.gameNotes;
     const freq = notes[this.noteIndex % notes.length];
     this.noteIndex++;
 
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
-    osc.type = state.bossActive ? 'sawtooth' : 'sine';
+    osc.type = state.bossActive ? 'sawtooth' :
+               state.bonusPhaseActive ? 'triangle' : 'sine';
     osc.frequency.value = freq;
     gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.25);
@@ -127,6 +139,26 @@ export class AudioSystem extends createSystem({}) {
 
   playMenuSelect(): void {
     this.playSfx(600, 'sine', 0.08, 0.0);
+  }
+
+  playGameOver(): void {
+    // Descending fanfare
+    const notes = [784, 659, 523, 440, 349, 262];
+    notes.forEach((f, i) => this.playSfx(f, 'triangle', 0.1, i * 0.15));
+    // Final low note
+    this.playSfx(131, 'sawtooth', 0.08, notes.length * 0.15);
+  }
+
+  playDash(): void {
+    this.playSfx(500, 'sine', 0.06, 0.0);
+    this.playSfx(700, 'sine', 0.04, 0.03);
+    this.playNoise(0.08, 0.04);
+  }
+
+  playWhirlpool(): void {
+    this.playSfx(150, 'sine', 0.08, 0.0);
+    this.playSfx(120, 'sine', 0.06, 0.1);
+    this.playSfx(100, 'sine', 0.05, 0.2);
   }
 
   playWindGust(): void {

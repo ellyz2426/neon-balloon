@@ -85,6 +85,10 @@
       <div class="desc">Flap (hold to float)</div>
     </div>
     <div class="control-row">
+      <div class="key">E / Shift</div>
+      <div class="desc">Dash (1.5s cooldown)</div>
+    </div>
+    <div class="control-row">
       <div class="key">Esc / P</div>
       <div class="desc">Pause game</div>
     </div>
@@ -100,6 +104,10 @@
       <div class="key">Trigger</div>
       <div class="desc">Flap</div>
     </div>
+    <div class="control-row">
+      <div class="key">A / X Button</div>
+      <div class="desc">Dash</div>
+    </div>
   </div>
   <div class="divider"></div>
   <div class="section">
@@ -108,6 +116,8 @@
     <div class="tip">• Losing all balloons = parachute fall</div>
     <div class="tip">• Catch fish jumping from water for bonus points</div>
     <div class="tip">• Chain defeats for combo multipliers</div>
+    <div class="tip">• Dash through danger with brief invincibility</div>
+    <div class="tip">• Watch for whirlpools pulling you toward water!</div>
   </div>
   <div class="btn" id="btn-tutorial-back">
     <div class="btn-text">GOT IT!</div>

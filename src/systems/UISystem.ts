@@ -262,6 +262,15 @@ export class UISystem extends createSystem({}) {
     }).join(' | ');
     this.hudPanel.getElementById('powerup')?.setProperties({ text: puText || '' });
 
+    // Dash indicator
+    if (state.dashCooldown > 0) {
+      this.hudPanel.getElementById('dash')?.setProperties({
+        text: `DASH ${Math.ceil(state.dashCooldown * 10) / 10}s`,
+      });
+    } else {
+      this.hudPanel.getElementById('dash')?.setProperties({ text: 'DASH READY' });
+    }
+
     // Enemies remaining / bonus items
     if (state.bonusPhaseActive) {
       this.hudPanel.getElementById('enemies')?.setProperties({

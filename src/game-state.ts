@@ -9,6 +9,19 @@ export type EnemyType = 'basic' | 'chaser' | 'dodger' | 'boss' | 'bomber';
 export type PowerUpType = 'shield' | 'speed' | 'extra-balloon' | 'lightning-immunity' | 'magnet' | 'freeze';
 export type Difficulty = 'easy' | 'normal' | 'hard';
 export type ColorTheme = 'neon-cyan' | 'neon-pink' | 'neon-green' | 'neon-gold';
+export type FormationType = 'v-shape' | 'line' | 'circle' | 'none';
+
+export interface WhirlpoolData {
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+  radius: number;
+  strength: number;
+  timer: number;
+  active: boolean;
+  mesh: import('@iwsdk/core').Object3D | null;
+}
 
 export interface EnemyData {
   id: number;
@@ -263,6 +276,18 @@ class GameState {
   // Score drops from defeated enemies
   scoreDrops: ScoreDropData[] = [];
 
+  // Whirlpool hazards
+  whirlpools: WhirlpoolData[] = [];
+
+  // Player dash
+  dashCooldown = 0;
+  dashTimer = 0;
+  dashDirX = 0;
+  dashDirY = 0;
+
+  // Combo flash
+  comboFlashTimer = 0;
+
   // Freeze state
   freezeTimer = 0;
 
@@ -363,7 +388,13 @@ class GameState {
     this.bonusItemsCollected = 0;
     this.bonusItemsTotal = 0;
     this.scoreDrops = [];
+    this.whirlpools = [];
     this.freezeTimer = 0;
+    this.dashCooldown = 0;
+    this.dashTimer = 0;
+    this.dashDirX = 0;
+    this.dashDirY = 0;
+    this.comboFlashTimer = 0;
     this.phaseTransitionTimer = 0;
     this.shakeTimer = 0;
     this.slowMoTimer = 0;
@@ -390,6 +421,7 @@ class GameState {
   addCombo(): void {
     this.combo++;
     this.comboTimer = 3;
+    this.comboFlashTimer = 0.5;
     if (this.combo > this.bestCombo) this.bestCombo = this.combo;
   }
 

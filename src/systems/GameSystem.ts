@@ -33,7 +33,7 @@ import {
   type EnemyData, type PowerUpData, type PlatformData,
   type FishData, type LightningData, type PowerUpType,
   type IcicleData, type WindZoneData, type BonusItemData,
-  type ScoreDropData,
+  type ScoreDropData, type WhirlpoolData, type FormationType,
 } from '../game-state.js';
 import { AudioSystem } from './AudioSystem.js';
 
@@ -141,6 +141,15 @@ export class GameSystem extends createSystem({}) {
   // Score drops
   private scoreDrops: ScoreDropData[] = [];
 
+  // Whirlpool tracking
+  private whirlpoolSpawnTimer = 0;
+
+  // Formation spawning
+  private nextFormation: FormationType = 'none';
+
+  // Combo flash mesh
+  private comboFlashMesh: Mesh | null = null;
+
   // Platform generation tracking
   private platformsGenerated = false;
 
@@ -151,6 +160,7 @@ export class GameSystem extends createSystem({}) {
     this.buildClouds();
     this.buildShieldBubble();
     this.buildEnvironment();
+    this.buildComboFlash();
     this.setupInput();
   }
 
@@ -350,6 +360,11 @@ export class GameSystem extends createSystem({}) {
       if (e.code === 'Space' || e.code === 'KeyW' || e.code === 'ArrowUp') {
         this.flapPressed = true;
       }
+      // Dash on E or Shift
+      if ((e.code === 'KeyE' || e.code === 'ShiftLeft' || e.code === 'ShiftRight')
+          && state.phase === 'playing' && state.dashCooldown <= 0) {
+        this.triggerDash();
+      }
     });
     window.addEventListener('keyup', (e) => {
       this.keysDown.delete(e.code);
@@ -387,6 +402,8 @@ export class GameSystem extends createSystem({}) {
       this.updateTrail(sDt);
       this.updateBonusItems(sDt, time);
       this.updateScoreDrops(sDt, time);
+      this.updateWhirlpools(sDt, time);
+      this.updateDash(sDt);
       this.checkPhaseComplete();
       this.handleXRInput(sDt);
     }
@@ -404,6 +421,7 @@ export class GameSystem extends createSystem({}) {
     this.updateClouds(dt);
     this.updateShieldBubble(time);
     this.updateEnvironmentDecorations(time);
+    this.updateComboFlash(dt);
 
     if (state.mode === 'balloon-trip') {
       this.updateBalloonTrip(dt);
@@ -808,7 +826,6 @@ export class GameSystem extends createSystem({}) {
     if (this.enemySpawnQueue > 0) {
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) {
-        this.enemySpawnQueue--;
         this.spawnTimer = 1.5;
 
         if (state.isBossPhase() && !state.bossActive) {
@@ -831,7 +848,14 @@ export class GameSystem extends createSystem({}) {
               1.2, 0xff4444, 0.1,
             );
           }
+          this.enemySpawnQueue--;
+        } else if (this.nextFormation !== 'none' && this.enemySpawnQueue >= 3) {
+          // Formation spawn: spawn multiple enemies in pattern
+          this.spawnFormation(this.nextFormation);
+          this.nextFormation = 'none'; // Only one formation per phase
         } else {
+          this.enemySpawnQueue--;
+
           const r = Math.random();
           // Bomber appears from Phase 4+, more likely on Hard
           const bomberChance = state.currentPhase >= 4 ?
@@ -2489,6 +2513,14 @@ export class GameSystem extends createSystem({}) {
     state.phaseEnemiesDefeated = 0;
     this.enemySpawnQueue = count;
     this.spawnTimer = 0.5;
+
+    // Decide formation for this phase (higher phases get formations more often)
+    if (state.currentPhase >= 3 && Math.random() < 0.4 + state.currentPhase * 0.03) {
+      const formations: FormationType[] = ['v-shape', 'line', 'circle'];
+      this.nextFormation = formations[Math.floor(Math.random() * formations.length)];
+    } else {
+      this.nextFormation = 'none';
+    }
   }
 
   private checkPhaseComplete(): void {
@@ -2569,7 +2601,14 @@ export class GameSystem extends createSystem({}) {
       if (d.mesh) this.world.scene.remove(d.mesh);
     }
     state.scoreDrops = [];
+    // Clean whirlpools
+    for (const wp of state.whirlpools) {
+      if (wp.mesh) this.world.scene.remove(wp.mesh);
+    }
+    state.whirlpools = [];
     state.freezeTimer = 0;
+    state.dashCooldown = 0;
+    state.dashTimer = 0;
 
     this.generatePlatforms();
 
@@ -2646,6 +2685,11 @@ export class GameSystem extends createSystem({}) {
         }
       }
 
+      // A button = dash
+      if (right.getButtonDown?.('a-button')) {
+        this.triggerDash();
+      }
+
       // Thumbstick = move
       const axes = right.getAxesValues?.('xr-standard-thumbstick');
       if (axes) {
@@ -2669,6 +2713,11 @@ export class GameSystem extends createSystem({}) {
           this.flapCooldown = 0.15;
           this.animateFlap();
         }
+      }
+
+      // X button = dash (left hand)
+      if (left.getButtonDown?.('x-button')) {
+        this.triggerDash();
       }
     }
   }
@@ -2908,6 +2957,280 @@ export class GameSystem extends createSystem({}) {
     }
   }
 
+  // === COMBO FLASH VISUAL ===
+
+  private buildComboFlash(): void {
+    const mat = new MeshStandardMaterial({
+      color: 0xffff00, emissive: NEON_YELLOW, emissiveIntensity: 1,
+      transparent: true, opacity: 0,
+    });
+    this.comboFlashMesh = new Mesh(new RingGeometry(0.8, 1.2, 16), mat);
+    this.comboFlashMesh.visible = false;
+    this.world.scene.add(this.comboFlashMesh);
+  }
+
+  private updateComboFlash(dt: number): void {
+    if (!this.comboFlashMesh) return;
+
+    if (state.comboFlashTimer > 0) {
+      state.comboFlashTimer -= dt;
+      this.comboFlashMesh.visible = true;
+      this.comboFlashMesh.position.set(state.playerX, state.playerY + 1.2, 0.2);
+
+      const progress = 1 - state.comboFlashTimer / 0.5;
+      const scale = 0.5 + progress * 1.5;
+      this.comboFlashMesh.scale.setScalar(scale);
+
+      const mat = this.comboFlashMesh.material as MeshStandardMaterial;
+      mat.opacity = (1 - progress) * 0.6;
+
+      // Color based on combo level
+      if (state.combo >= 10) {
+        mat.color.setHex(0xff00ff);
+        mat.emissive.setHex(0xff00ff);
+      } else if (state.combo >= 5) {
+        mat.color.setHex(0xff8800);
+        mat.emissive.setHex(0xff8800);
+      } else {
+        mat.color.setHex(0xffff00);
+        mat.emissive.setHex(0xffff00);
+      }
+    } else {
+      this.comboFlashMesh.visible = false;
+    }
+  }
+
+  // === PLAYER DASH ===
+
+  private triggerDash(): void {
+    if (state.dashCooldown > 0 || !state.playerAlive || state.phase !== 'playing') return;
+
+    // Determine dash direction from input
+    let dx = 0;
+    let dy = 0;
+    if (this.keysDown.has('ArrowLeft') || this.keysDown.has('KeyA')) dx -= 1;
+    if (this.keysDown.has('ArrowRight') || this.keysDown.has('KeyD')) dx += 1;
+    if (this.keysDown.has('ArrowUp') || this.keysDown.has('KeyW')) dy += 1;
+    if (this.keysDown.has('ArrowDown') || this.keysDown.has('KeyS')) dy -= 1;
+
+    // Default dash direction = facing direction
+    if (dx === 0 && dy === 0) {
+      dx = state.playerFacing;
+    }
+
+    // Normalize
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len > 0) {
+      dx /= len;
+      dy /= len;
+    }
+
+    state.dashDirX = dx;
+    state.dashDirY = dy;
+    state.dashTimer = 0.15;
+    state.dashCooldown = 1.5;
+    state.playerInvincible = Math.max(state.playerInvincible, 0.2);
+
+    // Dash trail burst
+    const tc = state.getThemeColors();
+    for (let i = 0; i < 6; i++) {
+      this.spawnParticle(
+        state.playerX - dx * i * 0.3,
+        state.playerY - dy * i * 0.3,
+        0,
+        -dx * 2 + (Math.random() - 0.5),
+        -dy * 2 + (Math.random() - 0.5),
+        (Math.random() - 0.5),
+        0.3,
+        tc.accent,
+        0.06,
+      );
+    }
+
+    this.audio?.playDash();
+  }
+
+  private updateDash(dt: number): void {
+    if (state.dashCooldown > 0) state.dashCooldown -= dt;
+
+    if (state.dashTimer > 0) {
+      state.dashTimer -= dt;
+      const dashSpeed = 25;
+      state.playerVX = state.dashDirX * dashSpeed;
+      state.playerVY = state.dashDirY * dashSpeed;
+    }
+  }
+
+  // === FORMATION SPAWNING ===
+
+  private spawnFormation(type: FormationType): void {
+    const count = Math.min(this.enemySpawnQueue, 4);
+    this.enemySpawnQueue -= count;
+
+    const side = Math.random() > 0.5 ? 1 : -1;
+    const startX = side * (ARENA.MAX_X + 2);
+    const centerY = 5 + Math.random() * 6;
+
+    for (let i = 0; i < count; i++) {
+      let x = startX;
+      let y = centerY;
+
+      if (type === 'v-shape') {
+        // V-formation: leader in front, wings spread behind
+        const row = i === 0 ? 0 : Math.ceil(i / 2);
+        const wingSide = i % 2 === 0 ? 1 : -1;
+        x = startX + side * row * -2;
+        y = centerY + (i === 0 ? 0 : wingSide * row * 1.5);
+      } else if (type === 'line') {
+        // Horizontal line
+        y = centerY + (i - count / 2) * 2;
+      } else if (type === 'circle') {
+        // Circle pattern arriving from one side
+        const angle = (i / count) * Math.PI * 2;
+        x = startX;
+        y = centerY + Math.sin(angle) * 2.5;
+      }
+
+      const enemyType = i === 0 && Math.random() < 0.3 ? 'chaser' : 'basic';
+      const balloons = enemyType === 'chaser' ? 2 : 2;
+
+      const enemy: EnemyData = {
+        id: state.getId(),
+        type: enemyType,
+        x, y, z: 0,
+        vx: -side * (2 + Math.random()),
+        vy: 0,
+        balloons,
+        maxBalloons: balloons,
+        alive: true,
+        grounded: false,
+        groundTimer: 0,
+        flapCooldown: 0,
+        aiTimer: 0.5 + i * 0.3,
+        mesh: null,
+        balloonMeshes: [],
+      };
+
+      this.createEnemyMesh(enemy);
+      state.enemies.push(enemy);
+    }
+
+    // Formation spawn particles
+    for (let i = 0; i < 12; i++) {
+      this.spawnParticle(
+        startX, centerY + (Math.random() - 0.5) * 4, 0,
+        -side * 3, (Math.random() - 0.5) * 2, 0,
+        0.8, 0xff4444, 0.06,
+      );
+    }
+  }
+
+  // === WHIRLPOOL WATER HAZARD ===
+
+  private updateWhirlpools(dt: number, time: number): void {
+    if (state.currentPhase < 6) return;
+
+    this.whirlpoolSpawnTimer -= dt;
+    const interval = Math.max(15 - state.currentPhase * 0.5, 6);
+    if (this.whirlpoolSpawnTimer <= 0 && state.whirlpools.length < 2) {
+      this.whirlpoolSpawnTimer = interval + Math.random() * 8;
+      this.spawnWhirlpool();
+    }
+
+    for (const wp of state.whirlpools) {
+      if (!wp.active) continue;
+
+      wp.timer -= dt;
+      if (wp.timer <= 0) {
+        wp.active = false;
+        if (wp.mesh) { this.world.scene.remove(wp.mesh); wp.mesh = null; }
+        continue;
+      }
+
+      // Suck nearby entities toward center and down
+      if (state.playerAlive) {
+        const dx = wp.x - state.playerX;
+        const dy = wp.y - state.playerY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < wp.radius && dist > 0.3) {
+          const pull = wp.strength * (1 - dist / wp.radius);
+          state.playerVX += (dx / dist) * pull * dt;
+          state.playerVY += (dy / dist) * pull * dt - 2 * dt;
+        }
+      }
+
+      // Also affect enemies
+      for (const e of state.enemies) {
+        if (!e.alive) continue;
+        const dx = wp.x - e.x;
+        const dy = wp.y - e.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < wp.radius && dist > 0.3) {
+          const pull = wp.strength * 0.5 * (1 - dist / wp.radius);
+          e.vx += (dx / dist) * pull * dt;
+          e.vy += (dy / dist) * pull * dt - 1 * dt;
+        }
+      }
+
+      // Visual: spinning particles
+      if (Math.random() < dt * 8) {
+        const angle = time * 3 + Math.random() * Math.PI * 2;
+        const r = wp.radius * (0.3 + Math.random() * 0.7);
+        this.spawnParticle(
+          wp.x + Math.cos(angle) * r,
+          wp.y + Math.sin(angle) * r * 0.3,
+          0,
+          -Math.sin(angle) * 3,
+          -1 - Math.random(),
+          0,
+          0.5,
+          0x2266aa,
+          0.04,
+        );
+      }
+
+      // Animate mesh
+      if (wp.mesh) {
+        wp.mesh.rotation.y = time * 4;
+        const scale = 1 + Math.sin(time * 3) * 0.1;
+        wp.mesh.scale.set(scale, 1, scale);
+        const mat = (wp.mesh as Mesh).material as MeshStandardMaterial;
+        mat.opacity = 0.15 + Math.sin(time * 5) * 0.05;
+      }
+    }
+
+    state.whirlpools = state.whirlpools.filter(w => w.active);
+  }
+
+  private spawnWhirlpool(): void {
+    const x = (Math.random() - 0.5) * ARENA.WIDTH * 0.6;
+    const wp: WhirlpoolData = {
+      id: state.getId(),
+      x, y: ARENA.WATER_Y + 0.3, z: 0,
+      radius: 3 + Math.random() * 2,
+      strength: 6 + Math.random() * 4,
+      timer: 8 + Math.random() * 6,
+      active: true, mesh: null,
+    };
+
+    // Whirlpool visual: rotating torus at water surface
+    const mat = new MeshStandardMaterial({
+      color: 0x003366, emissive: new Color(0x0066aa),
+      emissiveIntensity: 0.5, transparent: true, opacity: 0.2,
+      side: DoubleSide,
+    });
+    const mesh = new Mesh(new TorusGeometry(wp.radius * 0.6, 0.15, 8, 24), mat);
+    mesh.rotation.x = Math.PI / 2;
+    mesh.position.set(x, ARENA.WATER_Y + 0.2, 0);
+    this.world.scene.add(mesh);
+    wp.mesh = mesh;
+    state.whirlpools.push(wp);
+
+    // Spawn warning splash
+    this.spawnBurst(x, ARENA.WATER_Y + 0.3, 0x2266aa, 10);
+    this.audio?.playWhirlpool();
+  }
+
   // === PUBLIC METHODS (for UISystem) ===
 
   returnToMenu(): void {
@@ -2945,7 +3268,15 @@ export class GameSystem extends createSystem({}) {
       if (d.mesh) this.world.scene.remove(d.mesh);
     }
     state.scoreDrops = [];
+    // Clean whirlpools
+    for (const wp of state.whirlpools) {
+      if (wp.mesh) this.world.scene.remove(wp.mesh);
+    }
+    state.whirlpools = [];
     state.freezeTimer = 0;
+    state.dashCooldown = 0;
+    state.dashTimer = 0;
+    state.comboFlashTimer = 0;
     // Clean trail
     for (const t of this.trailNodes) {
       this.world.scene.remove(t.mesh);
