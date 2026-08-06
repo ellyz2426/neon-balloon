@@ -13,6 +13,7 @@ export class UISystem extends createSystem({}) {
   private resultsPanel: UIKitMLAsset | null = null;
   private settingsPanel: UIKitMLAsset | null = null;
   private statsPanel: UIKitMLAsset | null = null;
+  private tutorialPanel: UIKitMLAsset | null = null;
 
   private wired = false;
   private lastPhase = '';
@@ -25,6 +26,7 @@ export class UISystem extends createSystem({}) {
     this.resultsPanel = this.world.getSceneObject<UIKitMLAsset>('results-panel') ?? null;
     this.settingsPanel = this.world.getSceneObject<UIKitMLAsset>('settings-panel') ?? null;
     this.statsPanel = this.world.getSceneObject<UIKitMLAsset>('stats-panel') ?? null;
+    this.tutorialPanel = this.world.getSceneObject<UIKitMLAsset>('tutorial-panel') ?? null;
 
     // Wire up after a short delay to ensure panels are loaded
     setTimeout(() => this.wireButtons(), 500);
@@ -67,6 +69,10 @@ export class UISystem extends createSystem({}) {
       this.menuPanel.getElementById('btn-stats')?.addEventListener('click', () => {
         audio?.playMenuSelect();
         state.phase = 'stats';
+      });
+      this.menuPanel.getElementById('btn-tutorial')?.addEventListener('click', () => {
+        audio?.playMenuSelect();
+        state.phase = 'tutorial';
       });
     }
 
@@ -124,15 +130,36 @@ export class UISystem extends createSystem({}) {
       this.settingsPanel.getElementById('btn-sfx-up')?.addEventListener('click', () => {
         state.sfxVolume = Math.min(1, state.sfxVolume + 0.1);
       });
+      const themes: Array<import('../game-state.js').ColorTheme> = ['neon-cyan', 'neon-pink', 'neon-green', 'neon-gold'];
+      this.settingsPanel.getElementById('btn-theme-down')?.addEventListener('click', () => {
+        audio?.playMenuSelect();
+        const idx = themes.indexOf(state.colorTheme);
+        state.colorTheme = themes[(idx - 1 + themes.length) % themes.length];
+      });
+      this.settingsPanel.getElementById('btn-theme-up')?.addEventListener('click', () => {
+        audio?.playMenuSelect();
+        const idx = themes.indexOf(state.colorTheme);
+        state.colorTheme = themes[(idx + 1) % themes.length];
+      });
       this.settingsPanel.getElementById('btn-settings-back')?.addEventListener('click', () => {
         audio?.playMenuSelect();
         state.phase = 'menu';
+        // Persist settings
+        state.saveCareer();
       });
     }
 
     // Stats buttons
     if (this.statsPanel) {
       this.statsPanel.getElementById('btn-stats-back')?.addEventListener('click', () => {
+        audio?.playMenuSelect();
+        state.phase = 'menu';
+      });
+    }
+
+    // Tutorial buttons
+    if (this.tutorialPanel) {
+      this.tutorialPanel.getElementById('btn-tutorial-back')?.addEventListener('click', () => {
         audio?.playMenuSelect();
         state.phase = 'menu';
       });
@@ -185,6 +212,7 @@ export class UISystem extends createSystem({}) {
     show(this.resultsPanel, phase === 'game-over' || phase === 'phase-complete');
     show(this.settingsPanel, phase === 'settings');
     show(this.statsPanel, phase === 'stats');
+    show(this.tutorialPanel, phase === 'tutorial');
   }
 
   private updateHUD(): void {
@@ -206,6 +234,20 @@ export class UISystem extends createSystem({}) {
       this.hudPanel.getElementById('combo')?.setProperties({ text: '' });
     }
 
+    // Phase timer display (arcade only)
+    if (state.bonusPhaseActive) {
+      const secs = Math.ceil(state.phaseTimer);
+      this.hudPanel.getElementById('phase')?.setProperties({
+        text: `★ BONUS STAGE ★ ${secs}s`,
+      });
+    } else if (state.mode === 'arcade' && state.phaseTimeLimit > 0) {
+      const secs = Math.ceil(state.phaseTimer);
+      const urgentPrefix = secs <= 10 ? '⚠ ' : '';
+      this.hudPanel.getElementById('phase')?.setProperties({
+        text: `Phase ${state.currentPhase} | ${urgentPrefix}${secs}s`,
+      });
+    }
+
     // Active power-ups
     const puText = state.activePowerUps.map(p => {
       const icons: Record<string, string> = {
@@ -216,12 +258,34 @@ export class UISystem extends createSystem({}) {
     }).join(' | ');
     this.hudPanel.getElementById('powerup')?.setProperties({ text: puText || '' });
 
-    // Enemies remaining
-    const alive = state.enemies.filter(e => e.alive).length;
-    const total = state.mode === 'survival' ? `W${state.currentPhase}` : `${state.phaseEnemiesTotal}`;
-    this.hudPanel.getElementById('enemies')?.setProperties({
-      text: `${alive} / ${total}`,
-    });
+    // Enemies remaining / bonus items
+    if (state.bonusPhaseActive) {
+      this.hudPanel.getElementById('enemies')?.setProperties({
+        text: `Collected: ${state.bonusItemsCollected} / ${state.bonusItemsTotal}`,
+      });
+    } else {
+      const alive = state.enemies.filter(e => e.alive).length;
+      const total = state.mode === 'survival' ? `W${state.currentPhase}` :
+                    state.mode === 'balloon-trip' ? `${Math.floor(state.tripDistance)}m` :
+                    `${state.phaseEnemiesTotal}`;
+      this.hudPanel.getElementById('enemies')?.setProperties({
+        text: state.mode === 'balloon-trip' ? `Dist: ${Math.floor(state.tripDistance)}m` : `${alive} / ${total}`,
+      });
+    }
+
+    // Boss health bar
+    if (state.bossActive && state.bossMaxHP > 0) {
+      const pct = Math.max(0, state.bossCurrentHP / state.bossMaxHP);
+      this.hudPanel.getElementById('boss-bar-container')?.setProperties({ visible: true });
+      this.hudPanel.getElementById('boss-bar-fill')?.setProperties({
+        width: `${Math.floor(pct * 260)}`,
+      });
+      this.hudPanel.getElementById('boss-label')?.setProperties({
+        text: `BOSS ❤ ${state.bossCurrentHP}/${state.bossMaxHP}`,
+      });
+    } else {
+      this.hudPanel.getElementById('boss-bar-container')?.setProperties({ visible: false });
+    }
   }
 
   private updateResults(): void {
@@ -233,6 +297,20 @@ export class UISystem extends createSystem({}) {
     if (state.phase === 'game-over') {
       this.resultsPanel.getElementById('result-title')?.setProperties({ text: 'GAME OVER' });
       this.resultsPanel.getElementById('result-subtitle')?.setProperties({ text: `Reached Phase ${state.currentPhase}` });
+
+      // Check for new high score
+      const isNewHigh = state.score > state.career.highScore;
+      const modeHigh = state.mode === 'arcade' ? state.career.arcadeHighScore :
+                       state.mode === 'survival' ? state.career.survivalHighScore :
+                       state.career.tripHighScore;
+      const isNewModeHigh = state.score > modeHigh;
+
+      if (isNewHigh) {
+        this.resultsPanel.getElementById('result-title')?.setProperties({ text: '★ NEW HIGH SCORE! ★' });
+      } else if (isNewModeHigh) {
+        this.resultsPanel.getElementById('result-title')?.setProperties({ text: '★ NEW BEST! ★' });
+      }
+
       this.resultsPanel.getElementById('result-score')?.setProperties({ text: `${state.score}` });
       this.resultsPanel.getElementById('result-enemies')?.setProperties({ text: `${state.sessionEnemiesDefeated}` });
       this.resultsPanel.getElementById('result-balloons')?.setProperties({ text: `${state.sessionBalloonsPopped}` });
@@ -265,6 +343,14 @@ export class UISystem extends createSystem({}) {
     this.settingsPanel.getElementById('sfx-val')?.setProperties({
       text: `${Math.round(state.sfxVolume * 100)}%`,
     });
+
+    const themeNames: Record<string, string> = {
+      'neon-cyan': 'CYAN', 'neon-pink': 'PINK',
+      'neon-green': 'GREEN', 'neon-gold': 'GOLD',
+    };
+    this.settingsPanel.getElementById('theme-val')?.setProperties({
+      text: themeNames[state.colorTheme] || 'CYAN',
+    });
   }
 
   private updateStats(): void {
@@ -281,6 +367,21 @@ export class UISystem extends createSystem({}) {
     this.statsPanel.getElementById('stat-bestcombo')?.setProperties({ text: `${c.bestCombo}` });
     this.statsPanel.getElementById('stat-bosses')?.setProperties({ text: `${c.bossesDefeated}` });
     this.statsPanel.getElementById('stat-powerups')?.setProperties({ text: `${c.powerUpsCollected}` });
+
+    // Per-mode high scores
+    this.statsPanel.getElementById('stat-arcade-hs')?.setProperties({ text: `${c.arcadeHighScore}` });
+    this.statsPanel.getElementById('stat-survival-hs')?.setProperties({ text: `${c.survivalHighScore}` });
+    this.statsPanel.getElementById('stat-trip-hs')?.setProperties({ text: `${c.tripHighScore}` });
+
+    // Extra stats
+    const survMins = Math.floor(c.longestSurvival / 60);
+    const survSecs = Math.floor(c.longestSurvival % 60);
+    this.statsPanel.getElementById('stat-longestsurvival')?.setProperties({
+      text: survMins > 0 ? `${survMins}m ${survSecs}s` : `${survSecs}s`,
+    });
+    this.statsPanel.getElementById('stat-tripdist')?.setProperties({
+      text: `${Math.floor(c.bestTripDistance)}m`,
+    });
 
     const hrs = Math.floor(c.totalPlayTime / 3600);
     const mins = Math.floor((c.totalPlayTime % 3600) / 60);

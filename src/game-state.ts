@@ -4,10 +4,11 @@
  */
 
 export type GameMode = 'arcade' | 'balloon-trip' | 'survival';
-export type GamePhase = 'menu' | 'playing' | 'phase-complete' | 'game-over' | 'paused' | 'settings' | 'stats';
-export type EnemyType = 'basic' | 'chaser' | 'dodger' | 'boss';
+export type GamePhase = 'menu' | 'playing' | 'phase-complete' | 'game-over' | 'paused' | 'settings' | 'stats' | 'tutorial';
+export type EnemyType = 'basic' | 'chaser' | 'dodger' | 'boss' | 'bomber';
 export type PowerUpType = 'shield' | 'speed' | 'extra-balloon' | 'lightning-immunity' | 'magnet';
 export type Difficulty = 'easy' | 'normal' | 'hard';
+export type ColorTheme = 'neon-cyan' | 'neon-pink' | 'neon-green' | 'neon-gold';
 
 export interface EnemyData {
   id: number;
@@ -45,6 +46,9 @@ export interface PlatformData {
   y: number;
   z: number;
   width: number;
+  speed: number; // horizontal speed (0 = static)
+  originX: number;
+  range: number; // how far it moves from origin
   mesh: import('@iwsdk/core').Object3D | null;
 }
 
@@ -70,6 +74,41 @@ export interface LightningData {
   mesh: import('@iwsdk/core').Object3D | null;
 }
 
+export interface IcicleData {
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+  vy: number;
+  active: boolean;
+  mesh: import('@iwsdk/core').Object3D | null;
+}
+
+export interface WindZoneData {
+  id: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  forceX: number;
+  forceY: number;
+  timer: number;
+  active: boolean;
+  mesh: import('@iwsdk/core').Object3D | null;
+}
+
+export interface BonusItemData {
+  id: number;
+  type: 'coin' | 'gem' | 'star';
+  x: number;
+  y: number;
+  z: number;
+  vy: number;
+  points: number;
+  collected: boolean;
+  mesh: import('@iwsdk/core').Object3D | null;
+}
+
 export interface ActivePowerUp {
   type: PowerUpType;
   remaining: number;
@@ -79,6 +118,9 @@ export interface CareerStats {
   totalGames: number;
   totalScore: number;
   highScore: number;
+  arcadeHighScore: number;
+  survivalHighScore: number;
+  tripHighScore: number;
   totalEnemiesDefeated: number;
   totalBalloonsPopped: number;
   totalFishCaught: number;
@@ -87,12 +129,17 @@ export interface CareerStats {
   totalPlayTime: number;
   bossesDefeated: number;
   powerUpsCollected: number;
+  longestSurvival: number;
+  bestTripDistance: number;
 }
 
 const DEFAULT_STATS: CareerStats = {
   totalGames: 0,
   totalScore: 0,
   highScore: 0,
+  arcadeHighScore: 0,
+  survivalHighScore: 0,
+  tripHighScore: 0,
   totalEnemiesDefeated: 0,
   totalBalloonsPopped: 0,
   totalFishCaught: 0,
@@ -101,6 +148,8 @@ const DEFAULT_STATS: CareerStats = {
   totalPlayTime: 0,
   bossesDefeated: 0,
   powerUpsCollected: 0,
+  longestSurvival: 0,
+  bestTripDistance: 0,
 };
 
 function loadStats(): CareerStats {
@@ -114,6 +163,30 @@ function loadStats(): CareerStats {
 function saveStats(s: CareerStats): void {
   try {
     localStorage.setItem('neon-balloon-stats', JSON.stringify(s));
+  } catch { /* ignore */ }
+}
+
+function loadSettings(): { musicVolume: number; sfxVolume: number; difficulty: Difficulty; colorTheme: ColorTheme } {
+  try {
+    const raw = localStorage.getItem('neon-balloon-settings');
+    if (raw) {
+      const s = JSON.parse(raw);
+      return {
+        musicVolume: s.musicVolume ?? 0.5,
+        sfxVolume: s.sfxVolume ?? 0.7,
+        difficulty: s.difficulty ?? 'normal',
+        colorTheme: s.colorTheme ?? 'neon-cyan',
+      };
+    }
+  } catch { /* ignore */ }
+  return { musicVolume: 0.5, sfxVolume: 0.7, difficulty: 'normal', colorTheme: 'neon-cyan' };
+}
+
+function saveSettings(musicVolume: number, sfxVolume: number, difficulty: Difficulty, colorTheme: ColorTheme): void {
+  try {
+    localStorage.setItem('neon-balloon-settings', JSON.stringify({
+      musicVolume, sfxVolume, difficulty, colorTheme,
+    }));
   } catch { /* ignore */ }
 }
 
@@ -171,6 +244,14 @@ class GameState {
   fish: FishData[] = [];
   lightning: LightningData[] = [];
   activePowerUps: ActivePowerUp[] = [];
+  icicles: IcicleData[] = [];
+  windZones: WindZoneData[] = [];
+  bonusItems: BonusItemData[] = [];
+
+  // Bonus phase state
+  bonusPhaseActive = false;
+  bonusItemsCollected = 0;
+  bonusItemsTotal = 0;
 
   // Counters for unique IDs
   nextId = 1;
@@ -183,9 +264,22 @@ class GameState {
   sessionBossesDefeated = 0;
 
   // Settings
-  musicVolume = 0.5;
-  sfxVolume = 0.7;
+  musicVolume: number;
+  sfxVolume: number;
   neonIntensity = 1;
+  colorTheme: ColorTheme;
+
+  constructor() {
+    const saved = loadSettings();
+    this.musicVolume = saved.musicVolume;
+    this.sfxVolume = saved.sfxVolume;
+    this.difficulty = saved.difficulty;
+    this.colorTheme = saved.colorTheme;
+  }
+
+  // Boss health tracking
+  bossMaxHP = 0;
+  bossCurrentHP = 0;
 
   // Career stats
   career: CareerStats = loadStats();
@@ -197,6 +291,17 @@ class GameState {
   shakeIntensity = 0;
   slowMoTimer = 0;
   slowMoFactor = 1;
+
+  // Boss attack state
+  bossAttackTimer = 0;
+  bossAttackCooldown = 0;
+
+  // Phase timer
+  phaseTimeLimit = 0;
+  phaseTimer = 0;
+
+  // Trail tracking
+  trailTimer = 0;
 
   getId(): number {
     return this.nextId++;
@@ -233,10 +338,21 @@ class GameState {
     this.fish = [];
     this.lightning = [];
     this.activePowerUps = [];
+    this.icicles = [];
+    this.windZones = [];
+    this.bonusItems = [];
+    this.bonusPhaseActive = false;
+    this.bonusItemsCollected = 0;
+    this.bonusItemsTotal = 0;
     this.phaseTransitionTimer = 0;
     this.shakeTimer = 0;
     this.slowMoTimer = 0;
     this.slowMoFactor = 1;
+    this.bossAttackTimer = 0;
+    this.bossAttackCooldown = 0;
+    this.phaseTimeLimit = 0;
+    this.phaseTimer = 0;
+    this.trailTimer = 0;
   }
 
   resetPlayerForPhase(): void {
@@ -268,6 +384,24 @@ class GameState {
     this.career.totalGames++;
     this.career.totalScore += this.score;
     if (this.score > this.career.highScore) this.career.highScore = this.score;
+    // Per-mode high scores
+    if (this.mode === 'arcade' && this.score > this.career.arcadeHighScore) {
+      this.career.arcadeHighScore = this.score;
+    }
+    if (this.mode === 'survival' && this.score > this.career.survivalHighScore) {
+      this.career.survivalHighScore = this.score;
+    }
+    if (this.mode === 'balloon-trip' && this.score > this.career.tripHighScore) {
+      this.career.tripHighScore = this.score;
+    }
+    // Longest survival time
+    if (this.mode === 'survival' && this.gameTime > this.career.longestSurvival) {
+      this.career.longestSurvival = this.gameTime;
+    }
+    // Best trip distance
+    if (this.mode === 'balloon-trip' && this.tripDistance > this.career.bestTripDistance) {
+      this.career.bestTripDistance = this.tripDistance;
+    }
     this.career.totalEnemiesDefeated += this.sessionEnemiesDefeated;
     this.career.totalBalloonsPopped += this.sessionBalloonsPopped;
     this.career.totalFishCaught += this.sessionFishCaught;
@@ -277,6 +411,7 @@ class GameState {
     this.career.bossesDefeated += this.sessionBossesDefeated;
     this.career.powerUpsCollected += this.sessionPowerUps;
     saveStats(this.career);
+    saveSettings(this.musicVolume, this.sfxVolume, this.difficulty, this.colorTheme);
   }
 
   getDifficultyMultiplier(): number {
@@ -287,13 +422,30 @@ class GameState {
     }
   }
 
+  getThemeColors(): { primary: number; secondary: number; accent: number } {
+    switch (this.colorTheme) {
+      case 'neon-pink':
+        return { primary: 0xff00ff, secondary: 0xff88aa, accent: 0xff44aa };
+      case 'neon-green':
+        return { primary: 0x00ff88, secondary: 0x88ff44, accent: 0x44ff88 };
+      case 'neon-gold':
+        return { primary: 0xffaa00, secondary: 0xffcc44, accent: 0xffdd66 };
+      default: // neon-cyan
+        return { primary: 0x00ffff, secondary: 0x00e5ff, accent: 0x44ccff };
+    }
+  }
+
   getEnemyCountForPhase(): number {
     const base = Math.min(2 + Math.floor(this.currentPhase * 0.8), 8);
     return Math.ceil(base * this.getDifficultyMultiplier());
   }
 
   isBossPhase(): boolean {
-    return this.currentPhase % 5 === 0;
+    return this.currentPhase % 5 === 0 && !this.isBonusPhase();
+  }
+
+  isBonusPhase(): boolean {
+    return this.currentPhase % 10 === 0;
   }
 }
 

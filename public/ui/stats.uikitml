@@ -9,7 +9,7 @@
     border-color: rgba(118, 255, 3, 0.5);
     border-width: 2;
     width: 400;
-    height: 480;
+    height: 640;
   }
   .heading {
     font-size: 28;
@@ -110,6 +110,28 @@
   <div class="stat-row">
     <div class="stat-label">Phases Cleared</div>
     <div class="stat-value" id="stat-phases">0</div>
+  </div>
+  <div class="divider"></div>
+  <div class="section-label">MODE HIGH SCORES</div>
+  <div class="stat-row">
+    <div class="stat-label">Arcade Best</div>
+    <div class="highlight-value" id="stat-arcade-hs">0</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Survival Best</div>
+    <div class="highlight-value" id="stat-survival-hs">0</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Balloon Trip Best</div>
+    <div class="highlight-value" id="stat-trip-hs">0</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Longest Survival</div>
+    <div class="stat-value" id="stat-longestsurvival">0s</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Best Trip Dist</div>
+    <div class="stat-value" id="stat-tripdist">0m</div>
   </div>
   <div class="btn" id="btn-stats-back">
     <div class="btn-text">BACK</div>

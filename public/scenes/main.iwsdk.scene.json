@@ -76,6 +76,16 @@
         "RayInteractable": {},
         "ScreenSpace": { "top": "15%", "left": "50%", "width": "28vw", "height": "65vh" }
       }
+    },
+    {
+      "id": "tutorial-panel",
+      "name": "Tutorial Panel",
+      "content": { "type": "asset", "asset": "tutorial-panel" },
+      "transform": { "position": [0, 6, -3.5], "scale": 0.5 },
+      "components": {
+        "RayInteractable": {},
+        "ScreenSpace": { "top": "20%", "left": "50%", "width": "28vw", "height": "60vh" }
+      }
     }
   ]
 }

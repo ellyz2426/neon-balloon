@@ -32,6 +32,7 @@ import {
   state, ARENA,
   type EnemyData, type PowerUpData, type PlatformData,
   type FishData, type LightningData, type PowerUpType,
+  type IcicleData, type WindZoneData, type BonusItemData,
 } from '../game-state.js';
 
 // Reusable geometry
@@ -63,6 +64,18 @@ interface Particle {
   life: number; maxLife: number;
 }
 
+interface CloudData {
+  mesh: Mesh;
+  x: number; y: number; z: number;
+  speed: number;
+  scale: number;
+}
+
+interface TrailNode {
+  mesh: Mesh;
+  life: number;
+}
+
 export class GameSystem extends createSystem({}) {
   private arena: Group | null = null;
   private playerGroup: Group | null = null;
@@ -77,6 +90,30 @@ export class GameSystem extends createSystem({}) {
   private particles: Particle[] = [];
   private particlePool: Mesh[] = [];
 
+  // Clouds
+  private clouds: CloudData[] = [];
+
+  // Neon trail
+  private trailNodes: TrailNode[] = [];
+
+  // Shield visual
+  private shieldBubble: Mesh | null = null;
+
+  // Icicle + wind zone spawn timers
+  private icicleSpawnTimer = 0;
+  private windZoneSpawnTimer = 0;
+
+  // Boss special attack timer
+  private bossSpecialTimer = 0;
+
+  // Balloon Trip scrolling
+  private tripObstacles: { mesh: Object3D; x: number; gapY: number; gapH: number; scored: boolean }[] = [];
+  private tripSpawnX = 0;
+
+  // Environment decorations
+  private envDecorations: Object3D[] = [];
+  private decorationsBuilt = false;
+
   // Input state
   private keysDown = new Set<string>();
   private flapPressed = false;
@@ -90,6 +127,10 @@ export class GameSystem extends createSystem({}) {
   private enemySpawnQueue = 0;
   private fishSpawnTimer = 0;
   private lightningSpawnTimer = 0;
+
+  // Bonus stage
+  private bonusSpawnTimer = 0;
+  private bonusSpawnCount = 0;
   private powerUpSpawnTimer = 0;
 
   // Platform generation tracking
@@ -98,6 +139,9 @@ export class GameSystem extends createSystem({}) {
   init(): void {
     this.buildArena();
     this.buildPlayer();
+    this.buildClouds();
+    this.buildShieldBubble();
+    this.buildEnvironment();
     this.setupInput();
   }
 
@@ -126,13 +170,13 @@ export class GameSystem extends createSystem({}) {
     this.arena = new Group();
     scene.add(this.arena);
 
-    // Water surface
+    // Water surface (high-segment plane for vertex ripple animation)
     const waterMat = new MeshStandardMaterial({
       color: WATER_COLOR, emissive: new Color(0x001133),
       emissiveIntensity: 0.5, transparent: true, opacity: 0.8,
       metalness: 0.8, roughness: 0.2,
     });
-    this.waterPlane = new Mesh(new PlaneGeometry(ARENA.WIDTH + 4, ARENA.DEPTH + 2), waterMat);
+    this.waterPlane = new Mesh(new PlaneGeometry(ARENA.WIDTH + 4, ARENA.DEPTH + 2, 32, 8), waterMat);
     this.waterPlane.rotation.x = -Math.PI / 2;
     this.waterPlane.position.set(0, ARENA.WATER_Y, 0);
     this.arena.add(this.waterPlane);
@@ -326,6 +370,12 @@ export class GameSystem extends createSystem({}) {
       this.updatePowerUps(sDt, time);
       this.updateActivePowerUps(sDt);
       this.updateCombo(dt);
+      this.updateIcicles(sDt);
+      this.updateWindZones(sDt);
+      this.updateBossAttacks(sDt);
+      this.updatePhaseTimer(sDt);
+      this.updateTrail(sDt);
+      this.updateBonusItems(sDt, time);
       this.checkPhaseComplete();
       this.handleXRInput(sDt);
     }
@@ -340,10 +390,32 @@ export class GameSystem extends createSystem({}) {
     this.updateVisuals(dt, time);
     this.updateParticles(dt);
     this.updateCamera(dt);
+    this.updateClouds(dt);
+    this.updateShieldBubble(time);
+    this.updateEnvironmentDecorations(time);
 
-    // Water wave animation
+    if (state.mode === 'balloon-trip') {
+      this.updateBalloonTrip(dt);
+    }
+
+    // Water ripple animation (vertex-based wave)
     if (this.waterPlane) {
-      this.waterPlane.position.y = ARENA.WATER_Y + Math.sin(time * 1.5) * 0.05;
+      const geo = this.waterPlane.geometry as BufferGeometry;
+      const posAttr = geo.getAttribute('position');
+      if (posAttr) {
+        const arr = posAttr.array as Float32Array;
+        const count = posAttr.count;
+        for (let i = 0; i < count; i++) {
+          const ix = i * 3;
+          const x = arr[ix];
+          const y = arr[ix + 1];
+          // Combine two sine waves for a natural ripple pattern
+          arr[ix + 2] = Math.sin(x * 0.6 + time * 2) * 0.08
+                       + Math.sin(y * 1.2 + time * 3) * 0.04
+                       + Math.sin((x + y) * 0.4 + time * 1.5) * 0.05;
+        }
+        posAttr.needsUpdate = true;
+      }
     }
 
     // Player visibility
@@ -434,6 +506,7 @@ export class GameSystem extends createSystem({}) {
 
     // Water death
     if (state.playerY < ARENA.WATER_Y + 0.3) {
+      this.waterSplash(state.playerX);
       this.playerDie();
       return;
     }
@@ -479,6 +552,10 @@ export class GameSystem extends createSystem({}) {
           && state.playerVY < 0) {
         state.playerY = py + 0.5;
         state.playerVY = 0;
+        // Carry player with moving platform
+        if (plat.speed !== 0) {
+          state.playerVX += plat.speed * 0.8;
+        }
       }
     }
   }
@@ -504,9 +581,12 @@ export class GameSystem extends createSystem({}) {
 
   // === ENEMIES ===
 
-  private spawnEnemy(type: 'basic' | 'chaser' | 'dodger' | 'boss'): void {
+  private spawnEnemy(type: 'basic' | 'chaser' | 'dodger' | 'boss' | 'bomber'): void {
     const side = Math.random() > 0.5 ? 1 : -1;
-    const balloons = type === 'boss' ? 4 : type === 'chaser' ? 2 : type === 'dodger' ? 1 : 2;
+    const balloons = type === 'boss' ? 4 :
+                     type === 'bomber' ? 2 :
+                     type === 'chaser' ? 2 :
+                     type === 'dodger' ? 1 : 2;
 
     const enemy: EnemyData = {
       id: state.getId(),
@@ -536,18 +616,45 @@ export class GameSystem extends createSystem({}) {
     const isBoss = e.type === 'boss';
     const bodyScale = isBoss ? 1.5 : 1;
 
-    // Body
+    // Body — unique shapes per enemy type
     const bodyColor = e.type === 'boss' ? 0x880044 :
+                      e.type === 'bomber' ? 0x884488 :
                       e.type === 'chaser' ? 0x884400 :
                       e.type === 'dodger' ? 0x008844 : 0x664444;
     const emissiveColor = e.type === 'boss' ? NEON_RED :
+                          e.type === 'bomber' ? NEON_PINK :
                           e.type === 'chaser' ? NEON_ORANGE :
                           e.type === 'dodger' ? NEON_GREEN : new Color(0x884444);
 
     const bodyMat = new MeshStandardMaterial({
       color: bodyColor, emissive: emissiveColor, emissiveIntensity: 0.3,
     });
-    const body = new Mesh(new SphereGeometry(0.3 * bodyScale, 8, 6), bodyMat);
+
+    // Each enemy type gets a distinct body mesh
+    let body: Mesh;
+    if (e.type === 'chaser') {
+      // Chaser: pointed, aggressive cone shape
+      body = new Mesh(new ConeGeometry(0.28 * bodyScale, 0.7 * bodyScale, 6), bodyMat);
+      body.rotation.z = Math.PI; // point forward/down for aggressive look
+    } else if (e.type === 'dodger') {
+      // Dodger: slim, streamlined capsule (elongated cylinder)
+      body = new Mesh(new CylinderGeometry(0.2 * bodyScale, 0.18 * bodyScale, 0.65 * bodyScale, 8), bodyMat);
+    } else if (e.type === 'bomber') {
+      // Bomber: wide, bulky box body
+      body = new Mesh(new BoxGeometry(0.55 * bodyScale, 0.45 * bodyScale, 0.4 * bodyScale), bodyMat);
+    } else if (e.type === 'boss') {
+      // Boss: large sphere with armored ring
+      body = new Mesh(new SphereGeometry(0.35 * bodyScale, 10, 8), bodyMat);
+      const armorMat = new MeshStandardMaterial({
+        color: 0x440022, emissive: NEON_RED, emissiveIntensity: 0.4,
+      });
+      const armorRing = new Mesh(new TorusGeometry(0.38 * bodyScale, 0.06, 6, 12), armorMat);
+      armorRing.rotation.x = Math.PI / 2;
+      group.add(armorRing);
+    } else {
+      // Basic: standard sphere
+      body = new Mesh(new SphereGeometry(0.3 * bodyScale, 8, 6), bodyMat);
+    }
     group.add(body);
 
     // Head
@@ -572,6 +679,44 @@ export class GameSystem extends createSystem({}) {
       const crown = new Mesh(new CylinderGeometry(0.15, 0.2, 0.15, 5), crownMat);
       crown.position.set(0, 0.65, 0);
       group.add(crown);
+    }
+
+    // Bomber wings
+    if (e.type === 'bomber') {
+      const wingMat = new MeshStandardMaterial({ color: 0x553355, emissive: NEON_PINK, emissiveIntensity: 0.25 });
+      const wingL = new Mesh(new BoxGeometry(0.35, 0.06, 0.25), wingMat);
+      wingL.position.set(-0.4, 0, 0);
+      wingL.rotation.z = -0.2;
+      group.add(wingL);
+      const wingR = new Mesh(new BoxGeometry(0.35, 0.06, 0.25), wingMat);
+      wingR.position.set(0.4, 0, 0);
+      wingR.rotation.z = 0.2;
+      group.add(wingR);
+    }
+
+    // Dodger fins
+    if (e.type === 'dodger') {
+      const finMat = new MeshStandardMaterial({ color: 0x005533, emissive: NEON_GREEN, emissiveIntensity: 0.3 });
+      const finTop = new Mesh(new ConeGeometry(0.08, 0.3, 4), finMat);
+      finTop.position.set(0, 0.28, -0.12);
+      group.add(finTop);
+      const finL = new Mesh(new ConeGeometry(0.06, 0.2, 4), finMat);
+      finL.position.set(-0.18, -0.05, -0.08);
+      finL.rotation.z = 0.5;
+      group.add(finL);
+      const finR = new Mesh(new ConeGeometry(0.06, 0.2, 4), finMat);
+      finR.position.set(0.18, -0.05, -0.08);
+      finR.rotation.z = -0.5;
+      group.add(finR);
+    }
+
+    // Chaser spike accent
+    if (e.type === 'chaser') {
+      const spikeMat = new MeshStandardMaterial({ color: 0x553300, emissive: NEON_ORANGE, emissiveIntensity: 0.4 });
+      const spike = new Mesh(new ConeGeometry(0.06, 0.25, 4), spikeMat);
+      spike.position.set(0, -0.35, 0.15);
+      spike.rotation.x = -0.3;
+      group.add(spike);
     }
 
     // Feet
@@ -655,9 +800,16 @@ export class GameSystem extends createSystem({}) {
         if (state.isBossPhase() && !state.bossActive) {
           this.spawnEnemy('boss');
           state.bossActive = true;
+          state.bossMaxHP = 4;
+          state.bossCurrentHP = 4;
         } else {
           const r = Math.random();
-          const type = r < 0.15 ? 'dodger' : r < 0.4 ? 'chaser' : 'basic';
+          // Bomber appears from Phase 4+, more likely on Hard
+          const bomberChance = state.currentPhase >= 4 ?
+            (state.difficulty === 'hard' ? 0.2 : 0.1) : 0;
+          const type = r < bomberChance ? 'bomber' :
+                       r < bomberChance + 0.15 ? 'dodger' :
+                       r < bomberChance + 0.4 ? 'chaser' : 'basic';
           this.spawnEnemy(type);
         }
       }
@@ -666,7 +818,7 @@ export class GameSystem extends createSystem({}) {
     for (const e of state.enemies) {
       if (!e.alive) continue;
 
-      const speed = (e.type === 'chaser' ? 4 : e.type === 'dodger' ? 5 : e.type === 'boss' ? 2.5 : 3) * diffMult;
+      const speed = (e.type === 'chaser' ? 4 : e.type === 'dodger' ? 5 : e.type === 'bomber' ? 3.5 : e.type === 'boss' ? 2.5 : 3) * diffMult;
 
       if (e.balloons > 0) {
         // Flying AI
@@ -677,27 +829,58 @@ export class GameSystem extends createSystem({}) {
         // AI behavior
         e.aiTimer -= dt;
         if (e.aiTimer <= 0) {
-          e.aiTimer = 0.5 + Math.random() * 1.5;
+          // Hard mode: faster AI reaction
+          const aiInterval = state.difficulty === 'hard' ? 0.3 : 0.5;
+          e.aiTimer = aiInterval + Math.random() * 1.5;
 
           if (e.type === 'chaser') {
             // Chase player
             const dx = state.playerX - e.x;
             const dy = state.playerY - e.y;
-            e.vx += Math.sign(dx) * speed * 0.3;
+            const aggressiveness = state.difficulty === 'hard' ? 0.5 : 0.3;
+            e.vx += Math.sign(dx) * speed * aggressiveness;
             if (dy > 0.5) e.vy += 3;
+            // Hard: predict player movement
+            if (state.difficulty === 'hard') {
+              e.vx += state.playerVX * 0.15;
+            }
           } else if (e.type === 'dodger') {
             // Erratic movement
             e.vx += (Math.random() - 0.5) * speed;
             e.vy += (Math.random() - 0.3) * 3;
+            // Hard: dodge toward player more often
+            if (state.difficulty === 'hard' && Math.random() < 0.3) {
+              const dx = state.playerX - e.x;
+              e.vx += Math.sign(dx) * speed * 0.2;
+            }
+          } else if (e.type === 'bomber') {
+            // Bomber: fly above player and drop bombs (icicle-like projectiles)
+            const dx = state.playerX - e.x;
+            e.vx += Math.sign(dx) * speed * 0.25;
+            // Try to stay above player
+            if (e.y < state.playerY + 3) e.vy += 3;
+            // Drop bomb when roughly above player
+            if (Math.abs(dx) < 2 && e.y > state.playerY + 1 && Math.random() < 0.4) {
+              this.bomberDropBomb(e);
+            }
           } else if (e.type === 'boss') {
             // Boss: slow chase with periodic lunges
             const dx = state.playerX - e.x;
             e.vx += Math.sign(dx) * speed * 0.2;
             if (Math.random() < 0.2) e.vy += 4; // lunge up
+            // Hard: boss is more aggressive
+            if (state.difficulty === 'hard' && Math.random() < 0.15) {
+              e.vx += Math.sign(dx) * speed * 0.4;
+            }
           } else {
             // Basic: wander
             e.vx += (Math.random() - 0.5) * speed * 0.5;
             if (Math.random() < 0.3) e.vy += 2;
+            // Hard: basics occasionally charge at player
+            if (state.difficulty === 'hard' && Math.random() < 0.15) {
+              const dx = state.playerX - e.x;
+              e.vx += Math.sign(dx) * speed * 0.3;
+            }
           }
         }
 
@@ -758,6 +941,7 @@ export class GameSystem extends createSystem({}) {
 
       // Water death
       if (e.y < ARENA.WATER_Y + 0.3) {
+        this.waterSplash(e.x);
         this.defeatEnemy(e);
       }
 
@@ -875,6 +1059,11 @@ export class GameSystem extends createSystem({}) {
     state.addScore(100);
     state.addCombo();
 
+    // Track boss HP
+    if (e.type === 'boss') {
+      state.bossCurrentHP = e.balloons;
+    }
+
     // Pop particle at balloon position
     this.spawnBurst(e.x, e.y + 0.8, BALLOON_COLORS[(e.id + e.balloons) % BALLOON_COLORS.length], 8);
 
@@ -934,13 +1123,18 @@ export class GameSystem extends createSystem({}) {
         id: state.getId(),
         x, y, z: 0,
         width: w,
+        speed: (i > 1 && Math.random() < 0.3 + state.currentPhase * 0.05) ?
+          (Math.random() > 0.5 ? 1 : -1) * (1 + Math.random() * 1.5) : 0,
+        originX: x,
+        range: 2 + Math.random() * 3,
         mesh: null,
       };
 
       // Create mesh
+      const tc = state.getThemeColors();
       const mat = new MeshStandardMaterial({
         color: 0x112233,
-        emissive: NEON_CYAN,
+        emissive: new Color(tc.primary),
         emissiveIntensity: 0.2 + Math.random() * 0.2,
       });
       const mesh = new Mesh(new BoxGeometry(w, 0.25, 1.5), mat);
@@ -950,7 +1144,8 @@ export class GameSystem extends createSystem({}) {
 
       // Edge glow
       const edgeMat = new MeshStandardMaterial({
-        color: 0x000000, emissive: NEON_CYAN, emissiveIntensity: 0.6,
+        color: 0x000000, emissive: new Color(tc.accent),
+        emissiveIntensity: 0.6,
         transparent: true, opacity: 0.8,
       });
       const edge = new Mesh(new BoxGeometry(w + 0.1, 0.05, 1.6), edgeMat);
@@ -964,11 +1159,30 @@ export class GameSystem extends createSystem({}) {
   }
 
   private updatePlatforms(dt: number, time: number): void {
-    // Subtle glow animation
     for (const p of state.platforms) {
+      // Moving platform logic
+      if (p.speed !== 0) {
+        p.x += p.speed * dt;
+        // Reverse at range bounds
+        if (p.x > p.originX + p.range) {
+          p.x = p.originX + p.range;
+          p.speed = -Math.abs(p.speed);
+        } else if (p.x < p.originX - p.range) {
+          p.x = p.originX - p.range;
+          p.speed = Math.abs(p.speed);
+        }
+      }
+
       if (p.mesh) {
+        p.mesh.position.x = p.x;
+        // Subtle glow animation
         const mat = (p.mesh as Mesh).material as MeshStandardMaterial;
         mat.emissiveIntensity = 0.2 + Math.sin(time * 2 + p.id) * 0.1;
+
+        // Moving platform indicator: brighter glow
+        if (p.speed !== 0) {
+          mat.emissiveIntensity += 0.1;
+        }
       }
     }
   }
@@ -1261,6 +1475,34 @@ export class GameSystem extends createSystem({}) {
     const glow = new Mesh(new RingGeometry(0.4, 0.55, 16), glowMat);
     group.add(glow);
 
+    // Power-up type indicator icon floating above
+    const indicatorMat = new MeshStandardMaterial({
+      color: c, emissive: new Color(c), emissiveIntensity: 0.6,
+      transparent: true, opacity: 0.85,
+    });
+    let indicator: Mesh;
+    if (type === 'shield') {
+      // Shield: torus ring icon
+      indicator = new Mesh(new TorusGeometry(0.12, 0.03, 6, 8), indicatorMat);
+    } else if (type === 'speed') {
+      // Speed: arrow/cone pointing right
+      indicator = new Mesh(new ConeGeometry(0.1, 0.22, 4), indicatorMat);
+      indicator.rotation.z = -Math.PI / 2;
+    } else if (type === 'extra-balloon') {
+      // Extra balloon: small sphere
+      indicator = new Mesh(new SphereGeometry(0.1, 6, 4), indicatorMat);
+      indicator.scale.set(1, 1.3, 1);
+    } else if (type === 'lightning-immunity') {
+      // Lightning immunity: diamond shape (rotated box)
+      indicator = new Mesh(new BoxGeometry(0.12, 0.12, 0.12), indicatorMat);
+      indicator.rotation.z = Math.PI / 4;
+    } else {
+      // Magnet: wide flat cylinder
+      indicator = new Mesh(new CylinderGeometry(0.1, 0.1, 0.06, 8), indicatorMat);
+    }
+    indicator.position.set(0, 0.7, 0);
+    group.add(indicator);
+
     group.position.set(x, y, 0);
     this.world.scene.add(group);
     pu.mesh = group;
@@ -1308,6 +1550,842 @@ export class GameSystem extends createSystem({}) {
     }
   }
 
+  // === BONUS STAGE ===
+
+  private startBonusPhase(): void {
+    state.bonusPhaseActive = true;
+    state.bonusItemsCollected = 0;
+    const total = 10 + Math.floor(state.currentPhase / 10) * 3; // More items at higher levels
+    state.bonusItemsTotal = total;
+    this.bonusSpawnCount = total;
+    this.bonusSpawnTimer = 0.5;
+    this.enemySpawnQueue = 0;
+    state.phaseEnemiesTotal = 0;
+    state.phaseTimeLimit = 30 + total * 1.5; // Time limit for bonus
+    state.phaseTimer = state.phaseTimeLimit;
+  }
+
+  private spawnBonusItem(): void {
+    const types: Array<'coin' | 'gem' | 'star'> = ['coin', 'coin', 'coin', 'gem', 'gem', 'star'];
+    const type = types[Math.floor(Math.random() * types.length)];
+    const points = type === 'star' ? 500 : type === 'gem' ? 300 : 100;
+    const x = (Math.random() - 0.5) * ARENA.WIDTH * 0.8;
+    const y = ARENA.MAX_Y - 1;
+
+    const item: BonusItemData = {
+      id: state.getId(), type, x, y, z: 0,
+      vy: -(1 + Math.random() * 1.5),
+      points, collected: false, mesh: null,
+    };
+
+    const group = new Group();
+    const colors = { coin: 0xffcc00, gem: 0x44ffff, star: 0xff88ff };
+    const emissives = { coin: NEON_YELLOW, gem: NEON_CYAN, star: NEON_PINK };
+    const mat = new MeshStandardMaterial({
+      color: colors[type], emissive: emissives[type], emissiveIntensity: 0.7,
+    });
+
+    if (type === 'coin') {
+      const coin = new Mesh(new CylinderGeometry(0.2, 0.2, 0.05, 12), mat);
+      coin.rotation.x = Math.PI / 2;
+      group.add(coin);
+    } else if (type === 'gem') {
+      const top = new Mesh(new ConeGeometry(0.18, 0.22, 6), mat);
+      top.position.y = 0.11;
+      group.add(top);
+      const bot = new Mesh(new ConeGeometry(0.18, 0.15, 6), mat);
+      bot.rotation.z = Math.PI;
+      bot.position.y = -0.075;
+      group.add(bot);
+    } else {
+      // Star: use two intersecting flat boxes
+      const arm1 = new Mesh(new BoxGeometry(0.35, 0.1, 0.08), mat);
+      group.add(arm1);
+      const arm2 = new Mesh(new BoxGeometry(0.35, 0.1, 0.08), mat);
+      arm2.rotation.z = Math.PI / 2;
+      group.add(arm2);
+      const arm3 = new Mesh(new BoxGeometry(0.35, 0.1, 0.08), mat);
+      arm3.rotation.z = Math.PI / 4;
+      group.add(arm3);
+    }
+
+    // Glow ring
+    const glowMat = new MeshStandardMaterial({
+      color: 0x000000, emissive: emissives[type], emissiveIntensity: 0.5,
+      transparent: true, opacity: 0.3, side: DoubleSide,
+    });
+    const glow = new Mesh(new RingGeometry(0.3, 0.4, 12), glowMat);
+    group.add(glow);
+
+    group.position.set(x, y, 0);
+    this.world.scene.add(group);
+    item.mesh = group;
+    state.bonusItems.push(item);
+  }
+
+  private updateBonusItems(dt: number, time: number): void {
+    if (!state.bonusPhaseActive) return;
+
+    // Spawn items
+    if (this.bonusSpawnCount > 0) {
+      this.bonusSpawnTimer -= dt;
+      if (this.bonusSpawnTimer <= 0) {
+        this.spawnBonusItem();
+        this.bonusSpawnCount--;
+        this.bonusSpawnTimer = 0.6 + Math.random() * 0.4;
+      }
+    }
+
+    // Update items
+    for (const item of state.bonusItems) {
+      if (item.collected) continue;
+
+      item.y += item.vy * dt;
+
+      // Spin and bob
+      if (item.mesh) {
+        item.mesh.position.set(item.x, item.y, item.z);
+        item.mesh.rotation.y = time * 3;
+      }
+
+      // Water = missed
+      if (item.y < ARENA.WATER_Y + 0.5) {
+        item.collected = true;
+        if (item.mesh) { this.world.scene.remove(item.mesh); item.mesh = null; }
+        continue;
+      }
+
+      // Player collection
+      const dx = state.playerX - item.x;
+      const dy = state.playerY - item.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      // Magnet power-up: attract nearby items
+      const hasMagnet = state.activePowerUps.some(p => p.type === 'magnet');
+      if (hasMagnet && dist < 3) {
+        item.x += dx * 3 * dt;
+        if (item.mesh) item.mesh.position.x = item.x;
+      }
+      if (dist < 0.8) {
+        item.collected = true;
+        state.bonusItemsCollected++;
+        state.addScore(item.points);
+        this.spawnBurst(item.x, item.y, item.type === 'star' ? 0xff88ff : item.type === 'gem' ? 0x44ffff : 0xffcc00, 8);
+        if (item.mesh) { this.world.scene.remove(item.mesh); item.mesh = null; }
+      }
+    }
+
+    // Check bonus phase complete
+    const remaining = state.bonusItems.filter(i => !i.collected).length;
+    if (remaining === 0 && this.bonusSpawnCount === 0) {
+      this.endBonusPhase();
+    }
+  }
+
+  private endBonusPhase(): void {
+    // Clean up remaining items
+    for (const item of state.bonusItems) {
+      if (item.mesh) { this.world.scene.remove(item.mesh); item.mesh = null; }
+    }
+    state.bonusItems = [];
+    state.bonusPhaseActive = false;
+    // Bonus score for collecting everything
+    if (state.bonusItemsCollected === state.bonusItemsTotal) {
+      state.addScore(2000); // Perfect bonus
+    }
+    state.phase = 'phase-complete';
+    state.phaseTransitionTimer = 3;
+    state.addScore(state.currentPhase * 500);
+  }
+
+  // === CLOUDS ===
+
+  private buildClouds(): void {
+    const cloudMat = new MeshStandardMaterial({
+      color: 0x223355, emissive: new Color(0x112244),
+      emissiveIntensity: 0.2, transparent: true, opacity: 0.25,
+    });
+    for (let i = 0; i < 12; i++) {
+      const scale = 1.5 + Math.random() * 2.5;
+      const cloud = new Mesh(new SphereGeometry(1, 6, 4), cloudMat.clone());
+      cloud.scale.set(scale * 2, scale * 0.5, scale);
+      const x = (Math.random() - 0.5) * ARENA.WIDTH * 2;
+      const y = ARENA.MAX_Y - 3 + Math.random() * 4;
+      const z = -4 - Math.random() * 6;
+      cloud.position.set(x, y, z);
+
+      // Add cloud puffs for shape
+      const puff1 = new Mesh(new SphereGeometry(0.6, 5, 3), cloudMat.clone());
+      puff1.position.set(scale * 0.6, scale * 0.15, 0);
+      cloud.add(puff1);
+      const puff2 = new Mesh(new SphereGeometry(0.5, 5, 3), cloudMat.clone());
+      puff2.position.set(-scale * 0.5, scale * 0.1, 0);
+      cloud.add(puff2);
+
+      this.world.scene.add(cloud);
+      this.clouds.push({
+        mesh: cloud, x, y, z,
+        speed: 0.2 + Math.random() * 0.4,
+        scale,
+      });
+    }
+  }
+
+  private updateClouds(dt: number): void {
+    for (const c of this.clouds) {
+      c.x += c.speed * dt;
+      if (c.x > ARENA.MAX_X + 15) c.x = ARENA.MIN_X - 15;
+      c.mesh.position.x = c.x;
+      // Subtle vertical drift
+      c.mesh.position.y = c.y + Math.sin(c.x * 0.3) * 0.3;
+    }
+  }
+
+  // === SHIELD VISUAL ===
+
+  private buildShieldBubble(): void {
+    const mat = new MeshStandardMaterial({
+      color: 0x00ffff, emissive: NEON_CYAN, emissiveIntensity: 0.3,
+      transparent: true, opacity: 0.15, side: DoubleSide,
+    });
+    this.shieldBubble = new Mesh(new SphereGeometry(0.8, 12, 8), mat);
+    this.shieldBubble.visible = false;
+    this.world.scene.add(this.shieldBubble);
+  }
+
+  private updateShieldBubble(time: number): void {
+    if (!this.shieldBubble) return;
+    const hasShield = state.activePowerUps.some(p => p.type === 'shield');
+    this.shieldBubble.visible = hasShield && state.phase === 'playing';
+    if (hasShield) {
+      this.shieldBubble.position.set(state.playerX, state.playerY, state.playerZ);
+      const pulse = 0.8 + Math.sin(time * 4) * 0.08;
+      this.shieldBubble.scale.setScalar(pulse);
+      const mat = this.shieldBubble.material as MeshStandardMaterial;
+      mat.opacity = 0.12 + Math.sin(time * 6) * 0.05;
+    }
+  }
+
+  // === NEON TRAIL ===
+
+  private updateTrail(dt: number): void {
+    if (state.phase !== 'playing' || !state.playerAlive) return;
+
+    const speed = Math.sqrt(state.playerVX * state.playerVX + state.playerVY * state.playerVY);
+    state.trailTimer -= dt;
+
+    // Only emit trail when moving fast
+    if (speed > 3 && state.trailTimer <= 0) {
+      state.trailTimer = 0.04;
+      const tc = state.getThemeColors();
+      const trailMat = new MeshStandardMaterial({
+        color: tc.primary, emissive: new Color(tc.primary), emissiveIntensity: 0.7,
+        transparent: true, opacity: 0.6,
+      });
+      const trailMesh = new Mesh(new SphereGeometry(0.06, 4, 3), trailMat);
+      trailMesh.position.set(state.playerX, state.playerY, state.playerZ);
+      this.world.scene.add(trailMesh);
+      this.trailNodes.push({ mesh: trailMesh, life: 0.4 });
+    }
+
+    // Update trail nodes
+    for (let i = this.trailNodes.length - 1; i >= 0; i--) {
+      const t = this.trailNodes[i];
+      t.life -= dt;
+      if (t.life <= 0) {
+        this.world.scene.remove(t.mesh);
+        this.trailNodes.splice(i, 1);
+      } else {
+        const alpha = t.life / 0.4;
+        (t.mesh.material as MeshStandardMaterial).opacity = alpha * 0.6;
+        t.mesh.scale.setScalar(alpha * 0.12);
+      }
+    }
+
+    // Cap
+    while (this.trailNodes.length > 30) {
+      const t = this.trailNodes.shift()!;
+      this.world.scene.remove(t.mesh);
+    }
+  }
+
+  // === ICICLE HAZARDS (Phase 5+) ===
+
+  private updateIcicles(dt: number): void {
+    if (state.currentPhase < 5) return;
+
+    // Spawn icicles from ceiling
+    this.icicleSpawnTimer -= dt;
+    const interval = Math.max(5 - state.currentPhase * 0.3, 1.5);
+    if (this.icicleSpawnTimer <= 0 && state.icicles.length < 4) {
+      this.icicleSpawnTimer = interval + Math.random() * 3;
+      this.spawnIcicle();
+    }
+
+    for (const ice of state.icicles) {
+      if (!ice.active) continue;
+
+      // Warning phase: hang at ceiling for 1.5s before dropping
+      if (ice.vy === 0) {
+        ice.y -= 0; // stationary
+        // After a delay, start falling
+        ice.vy = -0.01; // trigger mark
+      } else if (ice.vy < -0.01) {
+        ice.y += ice.vy * dt;
+        ice.vy -= 12 * dt; // accelerate downward
+      } else {
+        // Transition from warning to falling
+        ice.vy = -2;
+      }
+
+      // Player collision
+      if (state.playerAlive && state.playerInvincible <= 0 && ice.vy < -1) {
+        const dx = state.playerX - ice.x;
+        const dy = state.playerY - ice.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 0.6) {
+          this.popPlayerBalloon();
+          ice.active = false;
+          if (ice.mesh) { this.world.scene.remove(ice.mesh); ice.mesh = null; }
+          this.spawnBurst(ice.x, ice.y, 0x88ccff, 8);
+          state.shakeTimer = 0.15;
+          state.shakeIntensity = 0.15;
+          continue;
+        }
+      }
+
+      // Hit water or floor
+      if (ice.y < ARENA.WATER_Y + 0.5) {
+        ice.active = false;
+        if (ice.mesh) { this.world.scene.remove(ice.mesh); ice.mesh = null; }
+        this.spawnBurst(ice.x, ARENA.WATER_Y + 0.5, 0x88ccff, 6);
+        continue;
+      }
+
+      // Update mesh
+      if (ice.mesh) {
+        ice.mesh.position.set(ice.x, ice.y, ice.z);
+        // Shimmer effect
+        const mat = (ice.mesh as Mesh).material as MeshStandardMaterial;
+        if (mat && ice.vy < -1) {
+          mat.emissiveIntensity = 0.5 + Math.random() * 0.3;
+        }
+      }
+    }
+
+    state.icicles = state.icicles.filter(i => i.active);
+  }
+
+  private spawnIcicle(): void {
+    const x = (Math.random() - 0.5) * ARENA.WIDTH * 0.8;
+    const icicle: IcicleData = {
+      id: state.getId(), x, y: ARENA.MAX_Y - 0.5, z: 0,
+      vy: 0, active: true, mesh: null,
+    };
+
+    const mat = new MeshStandardMaterial({
+      color: 0x88ccff, emissive: new Color(0x44aaff),
+      emissiveIntensity: 0.4, transparent: true, opacity: 0.85,
+    });
+    const mesh = new Mesh(coneGeo, mat);
+    mesh.scale.set(0.6, 1.8, 0.6);
+    mesh.rotation.x = Math.PI; // Point downward
+    mesh.position.set(x, ARENA.MAX_Y - 0.5, 0);
+    this.world.scene.add(mesh);
+    icicle.mesh = mesh;
+
+    // Warning indicator: small glow at spawn point
+    this.spawnParticle(x, ARENA.MAX_Y - 1, 0, 0, -0.5, 0, 1.2, 0x88ccff, 0.1);
+
+    state.icicles.push(icicle);
+  }
+
+  // === WIND ZONES (Phase 4+) ===
+
+  private updateWindZones(dt: number): void {
+    if (state.currentPhase < 4) return;
+
+    this.windZoneSpawnTimer -= dt;
+    const interval = Math.max(12 - state.currentPhase * 0.5, 5);
+    if (this.windZoneSpawnTimer <= 0 && state.windZones.length < 2) {
+      this.windZoneSpawnTimer = interval + Math.random() * 6;
+      this.spawnWindZone();
+    }
+
+    for (const w of state.windZones) {
+      if (!w.active) continue;
+
+      w.timer -= dt;
+      if (w.timer <= 0) {
+        w.active = false;
+        if (w.mesh) { this.world.scene.remove(w.mesh); w.mesh = null; }
+        continue;
+      }
+
+      // Apply force to player if inside
+      if (state.playerAlive) {
+        const inX = state.playerX > w.x - w.width / 2 && state.playerX < w.x + w.width / 2;
+        const inY = state.playerY > w.y - w.height / 2 && state.playerY < w.y + w.height / 2;
+        if (inX && inY) {
+          state.playerVX += w.forceX * dt;
+          state.playerVY += w.forceY * dt;
+        }
+      }
+
+      // Apply force to enemies inside
+      for (const e of state.enemies) {
+        if (!e.alive) continue;
+        const inX = e.x > w.x - w.width / 2 && e.x < w.x + w.width / 2;
+        const inY = e.y > w.y - w.height / 2 && e.y < w.y + w.height / 2;
+        if (inX && inY) {
+          e.vx += w.forceX * dt * 0.5;
+          e.vy += w.forceY * dt * 0.5;
+        }
+      }
+
+      // Visual animation — particles flowing in wind direction
+      if (w.mesh) {
+        const mat = (w.mesh as Mesh).material as MeshStandardMaterial;
+        mat.opacity = 0.08 + Math.sin(w.timer * 4) * 0.03;
+      }
+
+      // Spawn wind particle every few frames
+      if (Math.random() < dt * 5) {
+        const px = w.x + (Math.random() - 0.5) * w.width;
+        const py = w.y + (Math.random() - 0.5) * w.height;
+        this.spawnParticle(px, py, 0, w.forceX * 0.3, w.forceY * 0.3, 0, 0.5, 0x88aacc, 0.04);
+      }
+    }
+
+    state.windZones = state.windZones.filter(w => w.active);
+  }
+
+  private spawnWindZone(): void {
+    const x = (Math.random() - 0.5) * ARENA.WIDTH * 0.6;
+    const y = 3 + Math.random() * (ARENA.HEIGHT - 6);
+    const isHorizontal = Math.random() > 0.4;
+    const forceDir = Math.random() > 0.5 ? 1 : -1;
+
+    const wind: WindZoneData = {
+      id: state.getId(), x, y,
+      width: isHorizontal ? 6 + Math.random() * 4 : 3,
+      height: isHorizontal ? 3 : 5 + Math.random() * 3,
+      forceX: isHorizontal ? forceDir * (6 + Math.random() * 4) : 0,
+      forceY: isHorizontal ? 0 : forceDir * (4 + Math.random() * 3),
+      timer: 6 + Math.random() * 6,
+      active: true, mesh: null,
+    };
+
+    // Wind zone visual: transparent colored rectangle
+    const mat = new MeshStandardMaterial({
+      color: isHorizontal ? 0x4488aa : 0x44aa88,
+      emissive: isHorizontal ? new Color(0x224466) : new Color(0x226644),
+      emissiveIntensity: 0.3, transparent: true, opacity: 0.1,
+      side: DoubleSide,
+    });
+    const mesh = new Mesh(new PlaneGeometry(wind.width, wind.height), mat);
+    mesh.position.set(x, y, 0.1);
+    this.world.scene.add(mesh);
+    wind.mesh = mesh;
+    state.windZones.push(wind);
+  }
+
+  // === BOSS SPECIAL ATTACKS ===
+
+  private bomberDropBomb(bomber: EnemyData): void {
+    // Drop an icicle-like projectile from bomber position
+    const bomb: IcicleData = {
+      id: state.getId(),
+      x: bomber.x, y: bomber.y - 0.5, z: 0,
+      vy: -6, active: true, mesh: null,
+    };
+
+    const mat = new MeshStandardMaterial({
+      color: 0xff44ff, emissive: NEON_PINK, emissiveIntensity: 0.6,
+      transparent: true, opacity: 0.9,
+    });
+    const mesh = new Mesh(new SphereGeometry(0.15, 6, 4), mat);
+    mesh.position.set(bomber.x, bomber.y - 0.5, 0);
+    this.world.scene.add(mesh);
+    bomb.mesh = mesh;
+    state.icicles.push(bomb); // Reuse icicle collision logic
+    this.spawnParticle(bomber.x, bomber.y - 0.3, 0, 0, -1, 0, 0.3, 0xff44ff, 0.08);
+  }
+
+  // === ENVIRONMENT DECORATIONS ===
+
+  private buildEnvironment(): void {
+    if (this.decorationsBuilt) return;
+    this.decorationsBuilt = true;
+
+    const scene = this.world.scene;
+
+    // Neon columns along arena edges
+    for (let i = 0; i < 6; i++) {
+      const side = i < 3 ? -1 : 1;
+      const idx = i % 3;
+      const x = side * (ARENA.MAX_X + 1.5);
+      const y = (idx + 1) * (ARENA.HEIGHT / 4);
+
+      const colMat = new MeshStandardMaterial({
+        color: 0x000000,
+        emissive: i % 2 === 0 ? NEON_CYAN : NEON_PINK,
+        emissiveIntensity: 0.25,
+        transparent: true, opacity: 0.4,
+      });
+      const col = new Mesh(new CylinderGeometry(0.15, 0.15, ARENA.HEIGHT, 6), colMat);
+      col.position.set(x, ARENA.HEIGHT / 2, -2);
+      scene.add(col);
+      this.envDecorations.push(col);
+
+      // Ring accent on column
+      const ringMat = new MeshStandardMaterial({
+        color: 0x000000,
+        emissive: i % 2 === 0 ? NEON_PINK : NEON_CYAN,
+        emissiveIntensity: 0.5,
+        transparent: true, opacity: 0.6,
+      });
+      const ring = new Mesh(new TorusGeometry(0.25, 0.04, 6, 12), ringMat);
+      ring.position.set(x, y, -2);
+      ring.rotation.x = Math.PI / 2;
+      scene.add(ring);
+      this.envDecorations.push(ring);
+    }
+
+    // Bottom pipe/rail along water edge
+    const pipeMat = new MeshStandardMaterial({
+      color: 0x112233, emissive: NEON_BLUE, emissiveIntensity: 0.2,
+      transparent: true, opacity: 0.5,
+    });
+    const pipe = new Mesh(new CylinderGeometry(0.08, 0.08, ARENA.WIDTH + 4, 8), pipeMat);
+    pipe.rotation.z = Math.PI / 2;
+    pipe.position.set(0, ARENA.WATER_Y + 0.05, 1);
+    scene.add(pipe);
+    this.envDecorations.push(pipe);
+
+    // Floating neon rings in background (decorative)
+    for (let i = 0; i < 4; i++) {
+      const x = (i - 1.5) * 8;
+      const y = 5 + Math.random() * 8;
+      const nMat = new MeshStandardMaterial({
+        color: 0x000000,
+        emissive: [NEON_CYAN, NEON_PINK, NEON_GREEN, NEON_YELLOW][i],
+        emissiveIntensity: 0.2,
+        transparent: true, opacity: 0.2,
+      });
+      const nRing = new Mesh(new TorusGeometry(1 + Math.random(), 0.05, 8, 24), nMat);
+      nRing.position.set(x, y, -5 - Math.random() * 3);
+      nRing.rotation.x = Math.random() * Math.PI;
+      nRing.rotation.y = Math.random() * Math.PI;
+      scene.add(nRing);
+      this.envDecorations.push(nRing);
+    }
+
+    // Starfield enhancement — brighter stars with varying sizes
+    const starGeo = new BufferGeometry();
+    const starPositions: number[] = [];
+    const starSizes: number[] = [];
+    for (let i = 0; i < 200; i++) {
+      starPositions.push(
+        (Math.random() - 0.5) * 60,
+        Math.random() * 30,
+        -8 - Math.random() * 15,
+      );
+      starSizes.push(0.5 + Math.random() * 2);
+    }
+    starGeo.setAttribute('position', new Float32BufferAttribute(starPositions, 3));
+    starGeo.setAttribute('size', new Float32BufferAttribute(starSizes, 1));
+    const starMat = new PointsMaterial({
+      color: 0xffffff, size: 0.1,
+      transparent: true, opacity: 0.6,
+      blending: AdditiveBlending,
+    });
+    const stars = new Points(starGeo, starMat);
+    scene.add(stars);
+    this.envDecorations.push(stars as unknown as Object3D);
+  }
+
+  private updateEnvironmentDecorations(time: number): void {
+    // Animate neon rings in background
+    for (let i = 0; i < this.envDecorations.length; i++) {
+      const d = this.envDecorations[i];
+      if (d instanceof Mesh && d.geometry?.type === 'TorusGeometry') {
+        d.rotation.z = time * 0.3 + i * 0.5;
+        const mat = d.material as MeshStandardMaterial;
+        if (mat.emissiveIntensity !== undefined) {
+          mat.emissiveIntensity = 0.15 + Math.sin(time * 1.5 + i * 2) * 0.08;
+        }
+      }
+    }
+  }
+
+  // === BALLOON TRIP SCROLLING ===
+
+  private initBalloonTripScrolling(): void {
+    // Clear old static obstacles
+    this.tripObstacles = [];
+    this.tripSpawnX = 15;
+
+    // Spawn initial set of obstacles ahead
+    for (let i = 0; i < 6; i++) {
+      this.spawnTripObstacle(15 + i * 8);
+    }
+  }
+
+  private spawnTripObstacle(xPos: number): void {
+    const gapY = 3 + Math.random() * 9;
+    const gapH = Math.max(3.5 - state.currentPhase * 0.1, 2.2);
+
+    const group = new Group();
+    const mat = new MeshStandardMaterial({
+      color: 0x000000, emissive: NEON_YELLOW, emissiveIntensity: 0.5,
+      transparent: true, opacity: 0.6,
+    });
+
+    // Upper column
+    const upperH = ARENA.MAX_Y - gapY - gapH / 2;
+    if (upperH > 0.5) {
+      const upper = new Mesh(new BoxGeometry(0.4, upperH, 0.4), mat.clone());
+      upper.position.set(0, gapY + gapH / 2 + upperH / 2, 0);
+      group.add(upper);
+
+      // Spark at tip
+      const sparkMat = new MeshStandardMaterial({
+        color: 0xffff00, emissive: NEON_YELLOW, emissiveIntensity: 1,
+      });
+      const spark = new Mesh(new SphereGeometry(0.12, 4, 3), sparkMat);
+      spark.position.set(0, gapY + gapH / 2, 0);
+      group.add(spark);
+    }
+
+    // Lower column
+    const lowerH = gapY - gapH / 2 - ARENA.WATER_Y;
+    if (lowerH > 0.5) {
+      const lower = new Mesh(new BoxGeometry(0.4, lowerH, 0.4), mat.clone());
+      lower.position.set(0, ARENA.WATER_Y + lowerH / 2, 0);
+      group.add(lower);
+
+      const sparkMat2 = new MeshStandardMaterial({
+        color: 0xffff00, emissive: NEON_YELLOW, emissiveIntensity: 1,
+      });
+      const spark2 = new Mesh(new SphereGeometry(0.12, 4, 3), sparkMat2);
+      spark2.position.set(0, gapY - gapH / 2, 0);
+      group.add(spark2);
+    }
+
+    group.position.set(xPos, 0, 0);
+    this.world.scene.add(group);
+    this.tripObstacles.push({
+      mesh: group, x: xPos, gapY, gapH, scored: false,
+    });
+    this.tripSpawnX = xPos;
+  }
+
+  private updateBalloonTrip(dt: number): void {
+    if (state.mode !== 'balloon-trip' || state.phase !== 'playing') return;
+
+    const speed = state.tripSpeed + state.tripDistance * 0.003;
+    state.tripDistance += speed * dt;
+
+    // Scroll obstacles toward player
+    for (let i = this.tripObstacles.length - 1; i >= 0; i--) {
+      const obs = this.tripObstacles[i];
+      obs.x -= speed * dt;
+      obs.mesh.position.x = obs.x;
+
+      // Score when passing
+      if (!obs.scored && obs.x < state.playerX - 1) {
+        obs.scored = true;
+        state.addScore(100);
+        state.addCombo();
+      }
+
+      // Collision check
+      if (state.playerAlive && state.playerInvincible <= 0) {
+        const dx = state.playerX - obs.x;
+        if (Math.abs(dx) < 0.6) {
+          // Check if player is in the gap
+          const inGap = state.playerY > obs.gapY - obs.gapH / 2 + 0.3
+                     && state.playerY < obs.gapY + obs.gapH / 2 - 0.3;
+          if (!inGap) {
+            this.popPlayerBalloon();
+            state.shakeTimer = 0.15;
+            state.shakeIntensity = 0.2;
+          }
+        }
+      }
+
+      // Remove off-screen
+      if (obs.x < ARENA.MIN_X - 5) {
+        this.world.scene.remove(obs.mesh);
+        this.tripObstacles.splice(i, 1);
+      }
+    }
+
+    // Spawn new obstacles ahead
+    const farthest = this.tripObstacles.length > 0 ?
+      Math.max(...this.tripObstacles.map(o => o.x)) : state.playerX;
+    if (farthest < state.playerX + 40) {
+      this.spawnTripObstacle(farthest + 6 + Math.random() * 4);
+    }
+
+    // Update HUD with trip distance
+    state.currentPhase = Math.floor(state.tripDistance / 50) + 1;
+  }
+
+  private updateBossAttacks(dt: number): void {
+    if (!state.bossActive) return;
+
+    state.bossAttackCooldown -= dt;
+    if (state.bossAttackCooldown > 0) return;
+
+    const boss = state.enemies.find(e => e.type === 'boss' && e.alive);
+    if (!boss) return;
+
+    state.bossAttackCooldown = 4 + Math.random() * 3;
+    const diffMult = state.getDifficultyMultiplier();
+
+    // Pick random attack
+    const attackRoll = Math.random();
+
+    if (attackRoll < 0.35) {
+      // Lightning call — spawn lightning at player position
+      this.bossLightningCall(boss);
+    } else if (attackRoll < 0.65) {
+      // Shockwave — push player away from boss
+      this.bossShockwave(boss);
+    } else {
+      // Minion spawn — summon 1-2 basic enemies
+      this.bossSpawnMinions(boss, Math.ceil(diffMult));
+    }
+  }
+
+  private bossLightningCall(boss: EnemyData): void {
+    // Spawn a lightning bolt aimed at the player's current X
+    const l: LightningData = {
+      id: state.getId(),
+      x: state.playerX, y: ARENA.MAX_Y - 2, z: 0,
+      timer: 0.8, active: true, warningTimer: 1.2,
+      mesh: null,
+    };
+
+    const group = new Group();
+    const cloudMat = new MeshStandardMaterial({
+      color: 0x664444, emissive: NEON_RED, emissiveIntensity: 0.4,
+      transparent: true, opacity: 0.7,
+    });
+    const cloud = new Mesh(new SphereGeometry(0.8, 6, 4), cloudMat);
+    cloud.scale.set(1.5, 0.5, 1);
+    group.add(cloud);
+
+    const boltMat = new MeshStandardMaterial({
+      color: 0xff4444, emissive: NEON_RED, emissiveIntensity: 1,
+    });
+    let by = -0.5;
+    for (let i = 0; i < 5; i++) {
+      const seg = new Mesh(new BoxGeometry(0.18, 2, 0.18), boltMat);
+      seg.position.set((Math.random() - 0.5) * 0.4, by, 0);
+      seg.rotation.z = (Math.random() - 0.5) * 0.4;
+      group.add(seg);
+      by -= 2;
+    }
+
+    group.position.set(state.playerX, ARENA.MAX_Y - 2, 0);
+    this.world.scene.add(group);
+    l.mesh = group;
+    state.lightning.push(l);
+
+    // Visual indicator on boss
+    this.spawnBurst(boss.x, boss.y + 1, 0xff4444, 6);
+  }
+
+  private bossShockwave(boss: EnemyData): void {
+    // Push player away from boss
+    const dx = state.playerX - boss.x;
+    const dy = state.playerY - boss.y;
+    const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 0.5);
+    const force = 12 / dist;
+
+    if (dist < 8) {
+      state.playerVX += (dx / dist) * force;
+      state.playerVY += (dy / dist) * force * 0.5;
+      state.shakeTimer = 0.2;
+      state.shakeIntensity = 0.2;
+    }
+
+    // Shockwave visual ring
+    for (let i = 0; i < 16; i++) {
+      const angle = (i / 16) * Math.PI * 2;
+      this.spawnParticle(
+        boss.x + Math.cos(angle) * 0.5,
+        boss.y + Math.sin(angle) * 0.5,
+        0,
+        Math.cos(angle) * 6,
+        Math.sin(angle) * 6,
+        0,
+        0.6,
+        0xff6644,
+        0.08,
+      );
+    }
+  }
+
+  private bossSpawnMinions(boss: EnemyData, count: number): void {
+    const minions = Math.min(count, 2);
+    for (let i = 0; i < minions; i++) {
+      const e: EnemyData = {
+        id: state.getId(),
+        type: 'basic',
+        x: boss.x + (i === 0 ? -2 : 2),
+        y: boss.y,
+        z: 0,
+        vx: (i === 0 ? -2 : 2),
+        vy: 1,
+        balloons: 1,
+        maxBalloons: 1,
+        alive: true,
+        grounded: false,
+        groundTimer: 0,
+        flapCooldown: 0,
+        aiTimer: Math.random(),
+        mesh: null,
+        balloonMeshes: [],
+      };
+      this.createEnemyMesh(e);
+      state.enemies.push(e);
+    }
+    this.spawnBurst(boss.x, boss.y, 0xff8844, 10);
+  }
+
+  // === PHASE TIMER ===
+
+  private updatePhaseTimer(dt: number): void {
+    if (state.mode !== 'arcade' || state.phaseTimeLimit <= 0) return;
+
+    state.phaseTimer -= dt;
+    if (state.phaseTimer <= 0) {
+      state.phaseTimer = 0;
+
+      // Bonus phase timeout
+      if (state.bonusPhaseActive) {
+        this.endBonusPhase();
+        return;
+      }
+
+      // Time's up — bonus score if enemies remain, phase still progresses
+      // Damage remaining enemies (pop one balloon each)
+      for (const e of state.enemies) {
+        if (e.alive && e.balloons > 0) {
+          e.balloons--;
+          if (e.balloons <= 0) {
+            this.defeatEnemy(e);
+          } else {
+            this.updateEnemyBalloons(e);
+          }
+        }
+      }
+    }
+  }
+
   // === PHASE MANAGEMENT ===
 
   startGame(mode: 'arcade' | 'balloon-trip' | 'survival'): void {
@@ -1319,18 +2397,24 @@ export class GameSystem extends createSystem({}) {
     this.fishSpawnTimer = 3;
     this.lightningSpawnTimer = 10;
     this.powerUpSpawnTimer = 8;
+    this.icicleSpawnTimer = 8;
+    this.windZoneSpawnTimer = 12;
+    this.bossSpecialTimer = 5;
 
     if (mode === 'survival') {
-      // Survival: continuous spawning with escalating difficulty
       this.enemySpawnQueue = 3;
       this.spawnTimer = 1;
-      state.phaseEnemiesTotal = 999; // Never ends naturally
+      state.phaseEnemiesTotal = 999;
+      state.phaseTimeLimit = 0;
     } else if (mode === 'balloon-trip') {
-      // Balloon Trip: horizontal scrolling with obstacles
       this.enemySpawnQueue = 0;
       state.phaseEnemiesTotal = 999;
-      this.spawnBalloonTripObstacles();
+      state.phaseTimeLimit = 0;
+      this.initBalloonTripScrolling();
     } else {
+      // Arcade: set phase timer (generous time limit)
+      state.phaseTimeLimit = 60 + state.currentPhase * 10;
+      state.phaseTimer = state.phaseTimeLimit;
       this.spawnPhaseEnemies();
     }
   }
@@ -1366,6 +2450,9 @@ export class GameSystem extends createSystem({}) {
       return;
     }
 
+    // Bonus phase completion is handled by updateBonusItems
+    if (state.bonusPhaseActive) return;
+
     const aliveEnemies = state.enemies.filter(e => e.alive).length;
     if (aliveEnemies === 0 && this.enemySpawnQueue === 0 && state.phaseEnemiesTotal > 0) {
       state.phase = 'phase-complete';
@@ -1397,13 +2484,41 @@ export class GameSystem extends createSystem({}) {
       if (p.mesh) this.world.scene.remove(p.mesh);
     }
     state.powerUps = [];
+    for (const ice of state.icicles) {
+      if (ice.mesh) this.world.scene.remove(ice.mesh);
+    }
+    state.icicles = [];
+    for (const w of state.windZones) {
+      if (w.mesh) this.world.scene.remove(w.mesh);
+    }
+    state.windZones = [];
     state.activePowerUps = [];
+    // Clean bonus items
+    for (const item of state.bonusItems) {
+      if (item.mesh) this.world.scene.remove(item.mesh);
+    }
+    state.bonusItems = [];
+    state.bonusPhaseActive = false;
 
     this.generatePlatforms();
-    this.spawnPhaseEnemies();
+
+    // Check if this is a bonus phase (every 10th phase)
+    if (state.mode === 'arcade' && state.isBonusPhase()) {
+      this.startBonusPhase();
+    } else {
+      this.spawnPhaseEnemies();
+      // Phase timer for arcade
+      if (state.mode === 'arcade') {
+        state.phaseTimeLimit = 60 + state.currentPhase * 10;
+        state.phaseTimer = state.phaseTimeLimit;
+      }
+    }
+
     this.fishSpawnTimer = 3;
     this.lightningSpawnTimer = Math.max(8 - state.currentPhase * 0.5, 3);
     this.powerUpSpawnTimer = 8;
+    this.icicleSpawnTimer = 6;
+    this.windZoneSpawnTimer = 10;
   }
 
   // === VISUALS ===
@@ -1484,6 +2599,40 @@ export class GameSystem extends createSystem({}) {
     mesh.visible = true;
     this.world.scene.add(mesh);
     this.particles.push({ mesh, vx, vy, vz, life, maxLife: life });
+  }
+
+  private waterSplash(x: number): void {
+    // Upward splash particles
+    for (let i = 0; i < 12; i++) {
+      const angle = Math.PI * 0.1 + (i / 12) * Math.PI * 0.8; // Upward arc
+      const speed = 2 + Math.random() * 3;
+      this.spawnParticle(
+        x + (Math.random() - 0.5) * 0.5,
+        ARENA.WATER_Y + 0.3,
+        (Math.random() - 0.5) * 0.5,
+        Math.cos(angle) * speed * 0.5,
+        Math.sin(angle) * speed,
+        (Math.random() - 0.5),
+        0.6 + Math.random() * 0.4,
+        0x4488ff,
+        0.04 + Math.random() * 0.04,
+      );
+    }
+    // Water ring ripple particles
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      this.spawnParticle(
+        x + Math.cos(angle) * 0.5,
+        ARENA.WATER_Y + 0.15,
+        Math.sin(angle) * 0.3,
+        Math.cos(angle) * 2,
+        0.2,
+        Math.sin(angle) * 0.5,
+        0.4,
+        0x2266aa,
+        0.06,
+      );
+    }
   }
 
   private spawnBurst(x: number, y: number, color: number, count: number): void {
@@ -1603,6 +2752,24 @@ export class GameSystem extends createSystem({}) {
       if (p.mesh) this.world.scene.remove(p.mesh);
     }
     state.platforms = [];
+    for (const ice of state.icicles) {
+      if (ice.mesh) this.world.scene.remove(ice.mesh);
+    }
+    state.icicles = [];
+    for (const w of state.windZones) {
+      if (w.mesh) this.world.scene.remove(w.mesh);
+    }
+    state.windZones = [];
+    // Clean trail
+    for (const t of this.trailNodes) {
+      this.world.scene.remove(t.mesh);
+    }
+    this.trailNodes = [];
+    // Clean trip obstacles
+    for (const obs of this.tripObstacles) {
+      this.world.scene.remove(obs.mesh);
+    }
+    this.tripObstacles = [];
 
     state.phase = 'menu';
     this.platformsGenerated = false;

@@ -129,6 +129,36 @@ export class AudioSystem extends createSystem({}) {
     this.playSfx(600, 'sine', 0.08, 0.0);
   }
 
+  playWindGust(): void {
+    this.playNoise(0.4, 0.08);
+    this.playSfx(120, 'sine', 0.06, 0.1);
+    this.playSfx(180, 'sine', 0.04, 0.2);
+  }
+
+  playIcicle(): void {
+    this.playSfx(1200, 'sine', 0.06, 0.0);
+    this.playSfx(900, 'sine', 0.05, 0.05);
+    this.playNoise(0.1, 0.04);
+  }
+
+  playBossAttack(): void {
+    this.playSfx(120, 'sawtooth', 0.15, 0.0);
+    this.playSfx(80, 'sawtooth', 0.12, 0.08);
+    this.playNoise(0.2, 0.1);
+  }
+
+  playShieldBreak(): void {
+    this.playSfx(1000, 'square', 0.1, 0.0);
+    this.playSfx(700, 'square', 0.08, 0.05);
+    this.playSfx(400, 'square', 0.06, 0.1);
+  }
+
+  playSplash(): void {
+    this.playNoise(0.15, 0.06);
+    this.playSfx(300, 'sine', 0.06, 0.03);
+    this.playSfx(200, 'sine', 0.04, 0.08);
+  }
+
   private playSfx(freq: number, type: OscillatorType, vol: number, delay: number): void {
     if (!this.ctx || !this.sfxGain) return;
     const osc = this.ctx.createOscillator();

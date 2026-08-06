@@ -99,4 +99,7 @@
       <div class="small-text">STATS</div>
     </div>
   </div>
+  <div class="small-btn" id="btn-tutorial">
+    <div class="small-text">HOW TO PLAY</div>
+  </div>
 </Panel>

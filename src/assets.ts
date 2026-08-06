@@ -34,4 +34,9 @@ export default defineAssets({
     type: AssetType.UIKitML,
     name: 'Stats Panel',
   },
+  'tutorial-panel': {
+    url: publicAssetUrl('ui/tutorial.uikitml'),
+    type: AssetType.UIKitML,
+    name: 'Tutorial Panel',
+  },
 });

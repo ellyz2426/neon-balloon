@@ -9,7 +9,7 @@
     border-color: rgba(224, 64, 251, 0.5);
     border-width: 2;
     width: 380;
-    height: 400;
+    height: 480;
   }
   .heading {
     font-size: 28;
@@ -98,6 +98,16 @@
   <div class="option-row">
     <div class="toggle-btn" id="btn-sfx-down"><div class="toggle-text">−</div></div>
     <div class="toggle-btn" id="btn-sfx-up"><div class="toggle-text">+</div></div>
+  </div>
+  <div class="divider"></div>
+  <div class="section-label">COLOR THEME</div>
+  <div class="option-row">
+    <div class="opt-label">Theme</div>
+    <div class="opt-value" id="theme-val">CYAN</div>
+  </div>
+  <div class="option-row">
+    <div class="toggle-btn" id="btn-theme-down"><div class="toggle-text">◀</div></div>
+    <div class="toggle-btn" id="btn-theme-up"><div class="toggle-text">▶</div></div>
   </div>
   <div class="divider"></div>
   <div class="btn" id="btn-settings-back">
