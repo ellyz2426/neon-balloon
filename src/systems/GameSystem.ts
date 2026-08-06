@@ -794,9 +794,27 @@ export class GameSystem extends createSystem({}) {
       state.shakeTimer = 0.5;
       state.shakeIntensity = 0.5;
       this.spawnBurst(e.x, e.y, 0xffff00, 30);
+      // Victory confetti
+      for (let i = 0; i < 20; i++) {
+        const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff];
+        this.spawnParticle(
+          e.x + (Math.random() - 0.5) * 2,
+          e.y + Math.random() * 2,
+          (Math.random() - 0.5) * 2,
+          (Math.random() - 0.5) * 5,
+          3 + Math.random() * 5,
+          (Math.random() - 0.5) * 3,
+          1 + Math.random(),
+          colors[Math.floor(Math.random() * colors.length)],
+          0.08 + Math.random() * 0.06,
+        );
+      }
     } else {
       this.spawnBurst(e.x, e.y, 0xff8844, 10);
     }
+
+    // Score popup particle (larger, slower fade)
+    this.spawnParticle(e.x, e.y + 1, 0.5, 0, 2, 0, 1.2, 0xffff88, 0.15);
 
     // Remove mesh
     if (e.mesh) {
@@ -1297,11 +1315,24 @@ export class GameSystem extends createSystem({}) {
     state.resetForGame();
     state.phase = 'playing';
     this.generatePlatforms();
-    this.spawnPhaseEnemies();
+    this.createPlayerBalloons();
     this.fishSpawnTimer = 3;
     this.lightningSpawnTimer = 10;
     this.powerUpSpawnTimer = 8;
-    this.createPlayerBalloons();
+
+    if (mode === 'survival') {
+      // Survival: continuous spawning with escalating difficulty
+      this.enemySpawnQueue = 3;
+      this.spawnTimer = 1;
+      state.phaseEnemiesTotal = 999; // Never ends naturally
+    } else if (mode === 'balloon-trip') {
+      // Balloon Trip: horizontal scrolling with obstacles
+      this.enemySpawnQueue = 0;
+      state.phaseEnemiesTotal = 999;
+      this.spawnBalloonTripObstacles();
+    } else {
+      this.spawnPhaseEnemies();
+    }
   }
 
   private spawnPhaseEnemies(): void {
@@ -1313,6 +1344,28 @@ export class GameSystem extends createSystem({}) {
   }
 
   private checkPhaseComplete(): void {
+    if (state.mode === 'survival') {
+      // Survival: continuously spawn more enemies
+      const alive = state.enemies.filter(e => e.alive).length;
+      if (alive < 2 && this.enemySpawnQueue === 0) {
+        state.currentPhase++;
+        const count = Math.min(3 + Math.floor(state.currentPhase * 0.5), 8);
+        this.enemySpawnQueue = count;
+        this.spawnTimer = 0.5;
+        state.addScore(state.currentPhase * 200);
+        // Spawn bonus power-up every 3 waves
+        if (state.currentPhase % 3 === 0) {
+          this.powerUpSpawnTimer = 0.5;
+        }
+      }
+      return;
+    }
+
+    if (state.mode === 'balloon-trip') {
+      // Balloon Trip doesn't end from enemies
+      return;
+    }
+
     const aliveEnemies = state.enemies.filter(e => e.alive).length;
     if (aliveEnemies === 0 && this.enemySpawnQueue === 0 && state.phaseEnemiesTotal > 0) {
       state.phase = 'phase-complete';
@@ -1501,6 +1554,29 @@ export class GameSystem extends createSystem({}) {
     cam.position.y += (this.cameraTarget.y + 2 - cam.position.y) * dt * 2;
     cam.position.z = 18;
     cam.lookAt(this.cameraTarget.x, this.cameraTarget.y, 0);
+  }
+
+  private spawnBalloonTripObstacles(): void {
+    // Balloon Trip: spawn static lightning columns as obstacles
+    for (let i = 0; i < 8; i++) {
+      const x = (i - 4) * 3 + (Math.random() - 0.5) * 2;
+      const y = 2 + Math.random() * 10;
+      const gap = 3 + Math.random() * 2;
+
+      // Upper obstacle
+      const upperMat = new MeshStandardMaterial({
+        color: 0x000000, emissive: NEON_YELLOW, emissiveIntensity: 0.5,
+        transparent: true, opacity: 0.6,
+      });
+      const upper = new Mesh(new BoxGeometry(0.3, ARENA.MAX_Y - y - gap / 2, 0.3), upperMat);
+      upper.position.set(x, y + gap / 2 + (ARENA.MAX_Y - y - gap / 2) / 2, 0);
+      this.world.scene.add(upper);
+
+      // Lower obstacle
+      const lower = new Mesh(new BoxGeometry(0.3, y - gap / 2 - ARENA.WATER_Y, 0.3), upperMat.clone());
+      lower.position.set(x, ARENA.WATER_Y + (y - gap / 2 - ARENA.WATER_Y) / 2, 0);
+      this.world.scene.add(lower);
+    }
   }
 
   // === PUBLIC METHODS (for UISystem) ===

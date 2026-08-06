@@ -85,29 +85,32 @@ export class UISystem extends createSystem({}) {
 
     // Results buttons
     if (this.resultsPanel) {
-      this.resultsPanel.getElementById('btn-retry')?.addEventListener('click', () => {
+      this.resultsPanel.getElementById('btn-continue')?.addEventListener('click', () => {
         audio?.playMenuSelect();
-        game?.startGame(state.mode);
+        if (state.phase === 'game-over') {
+          game?.startGame(state.mode);
+        } else {
+          // Phase complete — continue handled by GameSystem timer
+        }
       });
       this.resultsPanel.getElementById('btn-menu')?.addEventListener('click', () => {
         audio?.playMenuSelect();
+        state.saveCareer();
         game?.returnToMenu();
       });
     }
 
     // Settings buttons
     if (this.settingsPanel) {
-      this.settingsPanel.getElementById('btn-easy')?.addEventListener('click', () => {
+      this.settingsPanel.getElementById('btn-diff-down')?.addEventListener('click', () => {
         audio?.playMenuSelect();
-        state.difficulty = 'easy';
+        if (state.difficulty === 'hard') state.difficulty = 'normal';
+        else if (state.difficulty === 'normal') state.difficulty = 'easy';
       });
-      this.settingsPanel.getElementById('btn-normal')?.addEventListener('click', () => {
+      this.settingsPanel.getElementById('btn-diff-up')?.addEventListener('click', () => {
         audio?.playMenuSelect();
-        state.difficulty = 'normal';
-      });
-      this.settingsPanel.getElementById('btn-hard')?.addEventListener('click', () => {
-        audio?.playMenuSelect();
-        state.difficulty = 'hard';
+        if (state.difficulty === 'easy') state.difficulty = 'normal';
+        else if (state.difficulty === 'normal') state.difficulty = 'hard';
       });
       this.settingsPanel.getElementById('btn-music-down')?.addEventListener('click', () => {
         state.musicVolume = Math.max(0, state.musicVolume - 0.1);
@@ -132,17 +135,6 @@ export class UISystem extends createSystem({}) {
       this.statsPanel.getElementById('btn-stats-back')?.addEventListener('click', () => {
         audio?.playMenuSelect();
         state.phase = 'menu';
-      });
-      this.statsPanel.getElementById('btn-stats-reset')?.addEventListener('click', () => {
-        audio?.playMenuSelect();
-        try { localStorage.removeItem('neon-balloon-stats'); } catch { /* */ }
-        state.career = {
-          totalGames: 0, totalScore: 0, highScore: 0,
-          totalEnemiesDefeated: 0, totalBalloonsPopped: 0,
-          totalFishCaught: 0, totalPhasesCleared: 0,
-          bestCombo: 0, totalPlayTime: 0,
-          bossesDefeated: 0, powerUpsCollected: 0,
-        };
       });
     }
   }
@@ -198,21 +190,20 @@ export class UISystem extends createSystem({}) {
   private updateHUD(): void {
     if (!this.hudPanel) return;
 
-    this.hudPanel.getElementById('score-val')?.setProperties({ text: `${state.score}` });
-    this.hudPanel.getElementById('phase-val')?.setProperties({ text: `Phase ${state.currentPhase}` });
-    this.hudPanel.getElementById('lives-val')?.setProperties({ text: `${'♥'.repeat(state.lives)}` });
-    this.hudPanel.getElementById('balloons-val')?.setProperties({
-      text: `${'🎈'.repeat(state.playerBalloons)}`,
+    this.hudPanel.getElementById('score')?.setProperties({ text: `${state.score}` });
+    this.hudPanel.getElementById('phase')?.setProperties({ text: `Phase ${state.currentPhase}` });
+    this.hudPanel.getElementById('lives')?.setProperties({ text: `${'♥'.repeat(state.lives)}` });
+    this.hudPanel.getElementById('balloons')?.setProperties({
+      text: `${'●'.repeat(state.playerBalloons)}`,
     });
 
     // Combo display
     if (state.combo > 1) {
-      this.hudPanel.getElementById('combo-val')?.setProperties({
+      this.hudPanel.getElementById('combo')?.setProperties({
         text: `x${state.combo} COMBO`,
-        display: 'flex',
       });
     } else {
-      this.hudPanel.getElementById('combo-val')?.setProperties({ text: '', display: 'none' });
+      this.hudPanel.getElementById('combo')?.setProperties({ text: '' });
     }
 
     // Active power-ups
@@ -223,55 +214,51 @@ export class UISystem extends createSystem({}) {
       };
       return `${icons[p.type] || p.type} ${Math.ceil(p.remaining)}s`;
     }).join(' | ');
-    this.hudPanel.getElementById('powerup-val')?.setProperties({ text: puText || '' });
+    this.hudPanel.getElementById('powerup')?.setProperties({ text: puText || '' });
 
     // Enemies remaining
     const alive = state.enemies.filter(e => e.alive).length;
-    this.hudPanel.getElementById('enemies-val')?.setProperties({
-      text: `Enemies: ${alive}`,
-    });
-
-    // Time
-    const mins = Math.floor(state.gameTime / 60);
-    const secs = Math.floor(state.gameTime % 60);
-    this.hudPanel.getElementById('time-val')?.setProperties({
-      text: `${mins}:${secs.toString().padStart(2, '0')}`,
+    const total = state.mode === 'survival' ? `W${state.currentPhase}` : `${state.phaseEnemiesTotal}`;
+    this.hudPanel.getElementById('enemies')?.setProperties({
+      text: `${alive} / ${total}`,
     });
   }
 
   private updateResults(): void {
     if (!this.resultsPanel) return;
 
+    const mins = Math.floor(state.gameTime / 60);
+    const secs = Math.floor(state.gameTime % 60);
+
     if (state.phase === 'game-over') {
       this.resultsPanel.getElementById('result-title')?.setProperties({ text: 'GAME OVER' });
-      this.resultsPanel.getElementById('result-score')?.setProperties({ text: `Score: ${state.score}` });
-      this.resultsPanel.getElementById('result-detail')?.setProperties({
-        text: `Phase ${state.currentPhase} | Enemies: ${state.sessionEnemiesDefeated} | Fish: ${state.sessionFishCaught} | Best Combo: ${state.bestCombo}`,
-      });
-      this.resultsPanel.getElementById('btn-retry')?.setProperties({ text: 'RETRY' });
+      this.resultsPanel.getElementById('result-subtitle')?.setProperties({ text: `Reached Phase ${state.currentPhase}` });
+      this.resultsPanel.getElementById('result-score')?.setProperties({ text: `${state.score}` });
+      this.resultsPanel.getElementById('result-enemies')?.setProperties({ text: `${state.sessionEnemiesDefeated}` });
+      this.resultsPanel.getElementById('result-balloons')?.setProperties({ text: `${state.sessionBalloonsPopped}` });
+      this.resultsPanel.getElementById('result-combo')?.setProperties({ text: `${state.bestCombo}` });
+      this.resultsPanel.getElementById('result-fish')?.setProperties({ text: `${state.sessionFishCaught}` });
+      this.resultsPanel.getElementById('result-time')?.setProperties({ text: `${mins}:${secs.toString().padStart(2, '0')}` });
+      this.resultsPanel.getElementById('btn-continue-text')?.setProperties({ text: 'RETRY' });
     } else if (state.phase === 'phase-complete') {
-      this.resultsPanel.getElementById('result-title')?.setProperties({ text: `PHASE ${state.currentPhase} CLEAR!` });
-      this.resultsPanel.getElementById('result-score')?.setProperties({ text: `Score: ${state.score} (+${state.phaseScore})` });
-      this.resultsPanel.getElementById('result-detail')?.setProperties({
-        text: `Enemies: ${state.phaseEnemiesDefeated} | Combo: ${state.bestCombo}`,
-      });
-      this.resultsPanel.getElementById('btn-retry')?.setProperties({ text: 'CONTINUE' });
+      this.resultsPanel.getElementById('result-title')?.setProperties({ text: 'PHASE CLEAR!' });
+      this.resultsPanel.getElementById('result-subtitle')?.setProperties({ text: `Phase ${state.currentPhase} Complete` });
+      this.resultsPanel.getElementById('result-score')?.setProperties({ text: `${state.score} (+${state.phaseScore})` });
+      this.resultsPanel.getElementById('result-enemies')?.setProperties({ text: `${state.phaseEnemiesDefeated}` });
+      this.resultsPanel.getElementById('result-balloons')?.setProperties({ text: `${state.sessionBalloonsPopped}` });
+      this.resultsPanel.getElementById('result-combo')?.setProperties({ text: `${state.bestCombo}` });
+      this.resultsPanel.getElementById('result-fish')?.setProperties({ text: `${state.sessionFishCaught}` });
+      this.resultsPanel.getElementById('result-time')?.setProperties({ text: `${mins}:${secs.toString().padStart(2, '0')}` });
+      this.resultsPanel.getElementById('btn-continue-text')?.setProperties({ text: 'NEXT PHASE' });
     }
   }
 
   private updateSettings(): void {
     if (!this.settingsPanel) return;
 
-    // Highlight current difficulty
-    const diffs = ['easy', 'normal', 'hard'];
-    for (const d of diffs) {
-      const isActive = state.difficulty === d;
-      this.settingsPanel.getElementById(`btn-${d}`)?.setProperties({
-        backgroundColor: isActive ? 'rgba(0, 255, 255, 0.3)' : 'rgba(100, 100, 255, 0.15)',
-        borderColor: isActive ? '#00ffff' : '#334466',
-      });
-    }
-
+    this.settingsPanel.getElementById('difficulty-val')?.setProperties({
+      text: state.difficulty.toUpperCase(),
+    });
     this.settingsPanel.getElementById('music-val')?.setProperties({
       text: `${Math.round(state.musicVolume * 100)}%`,
     });
@@ -285,17 +272,18 @@ export class UISystem extends createSystem({}) {
     const c = state.career;
 
     this.statsPanel.getElementById('stat-games')?.setProperties({ text: `${c.totalGames}` });
-    this.statsPanel.getElementById('stat-high')?.setProperties({ text: `${c.highScore}` });
-    this.statsPanel.getElementById('stat-total')?.setProperties({ text: `${c.totalScore}` });
+    this.statsPanel.getElementById('stat-highscore')?.setProperties({ text: `${c.highScore}` });
+    this.statsPanel.getElementById('stat-totalscore')?.setProperties({ text: `${c.totalScore}` });
     this.statsPanel.getElementById('stat-enemies')?.setProperties({ text: `${c.totalEnemiesDefeated}` });
     this.statsPanel.getElementById('stat-balloons')?.setProperties({ text: `${c.totalBalloonsPopped}` });
     this.statsPanel.getElementById('stat-fish')?.setProperties({ text: `${c.totalFishCaught}` });
     this.statsPanel.getElementById('stat-phases')?.setProperties({ text: `${c.totalPhasesCleared}` });
-    this.statsPanel.getElementById('stat-combo')?.setProperties({ text: `${c.bestCombo}` });
+    this.statsPanel.getElementById('stat-bestcombo')?.setProperties({ text: `${c.bestCombo}` });
     this.statsPanel.getElementById('stat-bosses')?.setProperties({ text: `${c.bossesDefeated}` });
     this.statsPanel.getElementById('stat-powerups')?.setProperties({ text: `${c.powerUpsCollected}` });
 
-    const mins = Math.floor(c.totalPlayTime / 60);
-    this.statsPanel.getElementById('stat-time')?.setProperties({ text: `${mins} min` });
+    const hrs = Math.floor(c.totalPlayTime / 3600);
+    const mins = Math.floor((c.totalPlayTime % 3600) / 60);
+    this.statsPanel.getElementById('stat-playtime')?.setProperties({ text: `${hrs}h ${mins}m` });
   }
 }
