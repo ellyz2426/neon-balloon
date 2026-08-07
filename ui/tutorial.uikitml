@@ -1,0 +1,141 @@
+<style>
+  .root {
+    flex-direction: column;
+    align-items: center;
+    padding: 24;
+    gap: 12;
+    background-color: rgba(0, 4, 16, 0.92);
+    border-radius: 14;
+    border-color: rgba(0, 255, 255, 0.4);
+    border-width: 2;
+    width: 380;
+    height: 500;
+  }
+  .heading {
+    font-size: 26;
+    color: #00ffff;
+  }
+  .section {
+    flex-direction: column;
+    gap: 6;
+    width: 320;
+  }
+  .section-title {
+    font-size: 16;
+    color: #ff88ff;
+    margin-top: 6;
+  }
+  .control-row {
+    flex-direction: row;
+    gap: 10;
+    align-items: center;
+  }
+  .key {
+    font-size: 13;
+    color: #00ffff;
+    background-color: rgba(0, 255, 255, 0.12);
+    padding: 4;
+    border-radius: 4;
+    border-color: rgba(0, 255, 255, 0.3);
+    border-width: 1;
+    min-width: 60;
+    align-items: center;
+  }
+  .desc {
+    font-size: 13;
+    color: rgba(255, 255, 255, 0.8);
+  }
+  .tip {
+    font-size: 12;
+    color: rgba(255, 200, 0, 0.7);
+    margin-top: 4;
+  }
+  .divider {
+    width: 300;
+    height: 1;
+    background-color: rgba(0, 255, 255, 0.2);
+  }
+  .btn {
+    padding: 12;
+    background-color: rgba(0, 255, 255, 0.12);
+    border-radius: 8;
+    border-color: rgba(0, 255, 255, 0.35);
+    border-width: 1;
+    width: 200;
+    align-items: center;
+    cursor: pointer;
+    margin-top: 8;
+  }
+  .btn-text {
+    font-size: 16;
+    color: #ffffff;
+  }
+</style>
+<Panel class="root">
+  <div class="heading">HOW TO PLAY</div>
+  <div class="divider"></div>
+  <div class="section">
+    <div class="section-title">KEYBOARD</div>
+    <div class="control-row">
+      <div class="key">A/D or ←→</div>
+      <div class="desc">Move left / right</div>
+    </div>
+    <div class="control-row">
+      <div class="key">Space / W</div>
+      <div class="desc">Flap (hold to float)</div>
+    </div>
+    <div class="control-row">
+      <div class="key">E / Shift</div>
+      <div class="desc">Dash (1.5s cooldown)</div>
+    </div>
+    <div class="control-row">
+      <div class="key">F</div>
+      <div class="desc">Bubble attack (stun, 3s cd)</div>
+    </div>
+    <div class="control-row">
+      <div class="key">Esc / P</div>
+      <div class="desc">Pause game</div>
+    </div>
+  </div>
+  <div class="divider"></div>
+  <div class="section">
+    <div class="section-title">VR CONTROLLERS</div>
+    <div class="control-row">
+      <div class="key">Thumbstick</div>
+      <div class="desc">Move left / right</div>
+    </div>
+    <div class="control-row">
+      <div class="key">Trigger</div>
+      <div class="desc">Flap</div>
+    </div>
+    <div class="control-row">
+      <div class="key">A / X Button</div>
+      <div class="desc">Dash</div>
+    </div>
+    <div class="control-row">
+      <div class="key">B Button</div>
+      <div class="desc">Bubble attack (stun)</div>
+    </div>
+  </div>
+  <div class="divider"></div>
+  <div class="section">
+    <div class="section-title">TIPS</div>
+    <div class="tip">• Land on enemies from ABOVE to pop their balloons</div>
+    <div class="tip">• Losing all balloons = parachute fall</div>
+    <div class="tip">• Catch fish jumping from water for bonus points</div>
+    <div class="tip">• Chain defeats for combo multipliers</div>
+    <div class="tip">• Dash through danger with brief invincibility</div>
+    <div class="tip">• Watch for whirlpools pulling you toward water!</div>
+    <div class="tip">• Magnet enemies pull you in — keep your distance!</div>
+    <div class="tip">• Teleporter enemies blink around unpredictably!</div>
+    <div class="tip">• Orange crumbling platforms break after landing!</div>
+    <div class="tip">• Shoot bubbles to stun enemies temporarily!</div>
+    <div class="tip">• Double-tap flap quickly for a boost flap!</div>
+    <div class="tip">• Watch for green acid rain in later phases!</div>
+    <div class="tip">• Swarm bugs are fast but weak — combo them!</div>
+    <div class="tip">• Red danger zones deal damage — dodge or dash!</div>
+  </div>
+  <div class="btn" id="btn-tutorial-back">
+    <div class="btn-text">GOT IT!</div>
+  </div>
+</Panel>

@@ -1,0 +1,61 @@
+<style>
+  .root {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 32;
+    gap: 16;
+    background-color: rgba(0, 4, 16, 0.92);
+    border-radius: 14;
+    border-color: rgba(255, 171, 0, 0.5);
+    border-width: 2;
+    width: 360;
+    height: 280;
+  }
+  .title {
+    font-size: 32;
+    color: #ffab00;
+  }
+  .info {
+    font-size: 14;
+    color: rgba(255, 255, 255, 0.6);
+  }
+  .btn {
+    padding: 12;
+    background-color: rgba(255, 171, 0, 0.15);
+    border-radius: 8;
+    border-color: rgba(255, 171, 0, 0.4);
+    border-width: 1;
+    width: 240;
+    align-items: center;
+    cursor: pointer;
+  }
+  .btn-text {
+    font-size: 18;
+    color: #ffffff;
+  }
+  .btn-secondary {
+    padding: 10;
+    background-color: rgba(255, 255, 255, 0.06);
+    border-radius: 6;
+    border-color: rgba(255, 255, 255, 0.15);
+    border-width: 1;
+    width: 240;
+    align-items: center;
+    cursor: pointer;
+  }
+  .btn-sec-text {
+    font-size: 15;
+    color: rgba(255, 255, 255, 0.7);
+  }
+</style>
+<Panel class="root">
+  <div class="title">PAUSED</div>
+  <div class="info" id="pause-info">Phase 1 — Score: 0</div>
+  <div class="btn" id="btn-resume">
+    <div class="btn-text">RESUME</div>
+  </div>
+  <div class="btn-secondary" id="btn-quit">
+    <div class="btn-sec-text">QUIT TO MENU</div>
+  </div>
+</Panel>

@@ -1,0 +1,139 @@
+<style>
+  .root {
+    flex-direction: column;
+    align-items: center;
+    padding: 28;
+    gap: 10;
+    background-color: rgba(0, 4, 16, 0.95);
+    border-radius: 14;
+    border-color: rgba(118, 255, 3, 0.5);
+    border-width: 2;
+    width: 400;
+    height: 640;
+  }
+  .heading {
+    font-size: 28;
+    color: #76ff03;
+  }
+  .stat-row {
+    flex-direction: row;
+    justify-content: space-between;
+    width: 320;
+    padding: 5;
+  }
+  .stat-label {
+    font-size: 14;
+    color: rgba(255, 255, 255, 0.6);
+  }
+  .stat-value {
+    font-size: 14;
+    color: #ffffff;
+  }
+  .highlight-value {
+    font-size: 16;
+    color: #76ff03;
+  }
+  .divider {
+    width: 320;
+    height: 1;
+    background-color: rgba(118, 255, 3, 0.2);
+  }
+  .section-label {
+    font-size: 12;
+    color: rgba(118, 255, 3, 0.5);
+    margin-top: 6;
+  }
+  .btn {
+    padding: 12;
+    background-color: rgba(118, 255, 3, 0.12);
+    border-radius: 8;
+    border-color: rgba(118, 255, 3, 0.35);
+    border-width: 1;
+    width: 200;
+    align-items: center;
+    cursor: pointer;
+    margin-top: 10;
+  }
+  .btn-text {
+    font-size: 16;
+    color: #ffffff;
+  }
+</style>
+<Panel class="root">
+  <div class="heading">CAREER STATS</div>
+  <div class="divider"></div>
+  <div class="section-label">OVERVIEW</div>
+  <div class="stat-row">
+    <div class="stat-label">Total Games</div>
+    <div class="stat-value" id="stat-games">0</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">High Score</div>
+    <div class="highlight-value" id="stat-highscore">0</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Total Score</div>
+    <div class="stat-value" id="stat-totalscore">0</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Play Time</div>
+    <div class="stat-value" id="stat-playtime">0h 0m</div>
+  </div>
+  <div class="divider"></div>
+  <div class="section-label">COMBAT</div>
+  <div class="stat-row">
+    <div class="stat-label">Enemies Defeated</div>
+    <div class="stat-value" id="stat-enemies">0</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Balloons Popped</div>
+    <div class="stat-value" id="stat-balloons">0</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Best Combo</div>
+    <div class="highlight-value" id="stat-bestcombo">0</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Bosses Defeated</div>
+    <div class="stat-value" id="stat-bosses">0</div>
+  </div>
+  <div class="divider"></div>
+  <div class="section-label">COLLECTION</div>
+  <div class="stat-row">
+    <div class="stat-label">Fish Caught</div>
+    <div class="stat-value" id="stat-fish">0</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Power-Ups Used</div>
+    <div class="stat-value" id="stat-powerups">0</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Phases Cleared</div>
+    <div class="stat-value" id="stat-phases">0</div>
+  </div>
+  <div class="divider"></div>
+  <div class="section-label">MODE HIGH SCORES</div>
+  <div class="stat-row">
+    <div class="stat-label">Arcade Best</div>
+    <div class="highlight-value" id="stat-arcade-hs">0</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Survival Best</div>
+    <div class="highlight-value" id="stat-survival-hs">0</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Balloon Trip Best</div>
+    <div class="highlight-value" id="stat-trip-hs">0</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Longest Survival</div>
+    <div class="stat-value" id="stat-longestsurvival">0s</div>
+  </div>
+  <div class="stat-row">
+    <div class="stat-label">Best Trip Dist</div>
+    <div class="stat-value" id="stat-tripdist">0m</div>
+  </div>
+  <div class="btn" id="btn-stats-back">
+    <div class="btn-text">BACK</div>
+  </div>
+</Panel>

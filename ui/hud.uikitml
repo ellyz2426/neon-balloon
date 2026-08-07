@@ -1,0 +1,128 @@
+<style>
+  .root {
+    flex-direction: column;
+    padding: 12;
+    gap: 5;
+    background-color: rgba(0, 4, 16, 0.8);
+    border-radius: 10;
+    border-color: rgba(0, 200, 255, 0.4);
+    border-width: 1;
+    width: 310;
+    height: 165;
+  }
+  .top-row {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .score-label {
+    font-size: 12;
+    color: rgba(0, 229, 255, 0.7);
+  }
+  .score-value {
+    font-size: 24;
+    color: #00e5ff;
+  }
+  .phase-text {
+    font-size: 14;
+    color: rgba(255, 255, 255, 0.8);
+  }
+  .mid-row {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .lives-text {
+    font-size: 14;
+    color: #ff4081;
+  }
+  .combo-text {
+    font-size: 16;
+    color: #ffab00;
+  }
+  .balloon-row {
+    flex-direction: row;
+    gap: 4;
+    align-items: center;
+  }
+  .balloon-label {
+    font-size: 12;
+    color: rgba(255, 255, 255, 0.5);
+  }
+  .balloon-count {
+    font-size: 16;
+    color: #76ff03;
+  }
+  .multiplier-text {
+    font-size: 13;
+    color: rgba(255, 200, 0, 0.9);
+  }
+  .time-text {
+    font-size: 11;
+    color: rgba(150, 180, 200, 0.6);
+  }
+  .powerup-text {
+    font-size: 12;
+    color: #e040fb;
+  }
+  .enemies-text {
+    font-size: 11;
+    color: rgba(255, 255, 255, 0.4);
+  }
+  .dash-text {
+    font-size: 11;
+    color: rgba(100, 200, 255, 0.7);
+  }
+  .boss-bar-bg {
+    width: 260;
+    height: 8;
+    background-color: rgba(255, 0, 0, 0.2);
+    border-radius: 4;
+    border-color: rgba(255, 100, 100, 0.4);
+    border-width: 1;
+  }
+  .boss-bar-fill {
+    height: 8;
+    background-color: rgba(255, 50, 50, 0.9);
+    border-radius: 4;
+  }
+  .boss-label {
+    font-size: 10;
+    color: rgba(255, 100, 100, 0.8);
+  }
+  .milestone-text {
+    font-size: 13;
+    color: rgba(255, 220, 100, 0.9);
+    text-align: center;
+  }
+</style>
+<Panel class="root">
+  <div class="top-row">
+    <div class="score-label">SCORE</div>
+    <div class="score-value" id="score">0</div>
+    <div class="multiplier-text" id="multiplier"></div>
+    <div class="phase-text" id="phase">PHASE 1</div>
+  </div>
+  <div class="mid-row">
+    <div class="balloon-row">
+      <div class="balloon-label">BALLOONS</div>
+      <div class="balloon-count" id="balloons">●●</div>
+    </div>
+    <div class="combo-text" id="combo"></div>
+    <div class="time-text" id="elapsed">0:00</div>
+  </div>
+  <div class="mid-row">
+    <div class="lives-text" id="lives">♥♥♥</div>
+    <div class="dash-text" id="dash"></div>
+    <div class="dash-text" id="bubble"></div>
+    <div class="powerup-text" id="powerup"></div>
+    <div class="enemies-text" id="enemies">0 / 0</div>
+  </div>
+  <div class="mid-row" id="boss-bar-container">
+    <div class="boss-label" id="boss-label">BOSS</div>
+    <div class="boss-bar-bg">
+      <div class="boss-bar-fill" id="boss-bar-fill"></div>
+    </div>
+  </div>
+  <div class="milestone-text" id="milestone"></div>
+</Panel>
