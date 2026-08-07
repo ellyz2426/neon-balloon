@@ -221,6 +221,14 @@ export class AudioSystem extends createSystem({}) {
     this.playSfx(160, 'sawtooth', 0.04, 0.3);
   }
 
+  playChainLightning(): void {
+    this.playSfx(1000, 'sawtooth', 0.1, 0.0);
+    this.playSfx(800, 'sawtooth', 0.08, 0.06);
+    this.playSfx(1200, 'sawtooth', 0.06, 0.12);
+    this.playSfx(600, 'sawtooth', 0.05, 0.18);
+    this.playNoise(0.2, 0.08);
+  }
+
   private playSfx(freq: number, type: OscillatorType, vol: number, delay: number): void {
     if (!this.ctx || !this.sfxGain) return;
     const osc = this.ctx.createOscillator();

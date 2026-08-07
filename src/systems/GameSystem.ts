@@ -1057,7 +1057,19 @@ export class GameSystem extends createSystem({}) {
           const aiInterval = state.difficulty === 'hard' ? 0.3 : 0.5;
           e.aiTimer = aiInterval + Math.random() * 1.5;
 
-          if (e.type === 'chaser') {
+          // Flee behavior: enemies with 1 balloon remaining try to escape (except boss)
+          if (e.balloons === 1 && e.maxBalloons > 1 && e.type !== 'boss' && e.type !== 'swarm') {
+            const dx = state.playerX - e.x;
+            const dy = state.playerY - e.y;
+            // Run away from player
+            e.vx -= Math.sign(dx) * speed * 0.4;
+            if (dy < 2) e.vy += 3; // Try to fly up and away
+            // Panicked flapping
+            if (e.mesh) {
+              const wobble = Math.sin(time * 20 + e.id) * 0.1;
+              e.mesh.rotation.z = wobble;
+            }
+          } else if (e.type === 'chaser') {
             // Chase player
             const dx = state.playerX - e.x;
             const dy = state.playerY - e.y;
@@ -1824,7 +1836,7 @@ export class GameSystem extends createSystem({}) {
   }
 
   private spawnPowerUp(): void {
-    const types: PowerUpType[] = ['shield', 'speed', 'extra-balloon', 'lightning-immunity', 'magnet', 'freeze'];
+    const types: PowerUpType[] = ['shield', 'speed', 'extra-balloon', 'lightning-immunity', 'magnet', 'freeze', 'chain-lightning'];
     const type = types[Math.floor(Math.random() * types.length)];
     const x = (Math.random() - 0.5) * ARENA.WIDTH * 0.7;
     const y = 3 + Math.random() * (ARENA.HEIGHT - 6);
@@ -1846,6 +1858,7 @@ export class GameSystem extends createSystem({}) {
       'lightning-immunity': 0x44ff44,
       'magnet': 0xff8844,
       'freeze': 0x88ddff,
+      'chain-lightning': 0xffee44,
     };
     const c = colors[type];
     const mat = new MeshStandardMaterial({
@@ -1893,6 +1906,9 @@ export class GameSystem extends createSystem({}) {
       // Lightning immunity: diamond shape (rotated box)
       indicator = new Mesh(new BoxGeometry(0.12, 0.12, 0.12), indicatorMat);
       indicator.rotation.z = Math.PI / 4;
+    } else if (type === 'chain-lightning') {
+      // Chain lightning: zigzag bolt shape (cone pointing up)
+      indicator = new Mesh(new ConeGeometry(0.08, 0.22, 3), indicatorMat);
     } else {
       // Magnet or freeze: wide flat cylinder
       indicator = new Mesh(new CylinderGeometry(0.1, 0.1, 0.06, 8), indicatorMat);
@@ -1928,6 +1944,9 @@ export class GameSystem extends createSystem({}) {
           this.spawnBurst(e.x, e.y, 0x88ddff, 6);
         }
       }
+    } else if (p.type === 'chain-lightning') {
+      // Instant effect: chain lightning zaps up to 4 nearest enemies
+      this.triggerChainLightning();
     } else {
       // Timed power-up
       const duration = p.type === 'shield' ? 15 : 8;
@@ -1936,6 +1955,50 @@ export class GameSystem extends createSystem({}) {
 
     this.spawnBurst(p.x, p.y, 0xffffff, 12);
     if (p.mesh) { this.world.scene.remove(p.mesh); p.mesh = null; }
+  }
+
+  private triggerChainLightning(): void {
+    // Find up to 4 nearest alive enemies and pop a balloon from each
+    const alive = state.enemies.filter(e => e.alive);
+    const sorted = alive.sort((a, b) => {
+      const da = Math.hypot(a.x - state.playerX, a.y - state.playerY);
+      const db = Math.hypot(b.x - state.playerX, b.y - state.playerY);
+      return da - db;
+    });
+    const targets = sorted.slice(0, 4);
+
+    // Chain visual: lightning bolts from player to each target
+    let prevX = state.playerX;
+    let prevY = state.playerY;
+
+    this.audio?.playChainLightning();
+    state.shakeTimer = 0.3;
+    state.shakeIntensity = 0.2;
+
+    for (const t of targets) {
+      // Lightning bolt particles along the path
+      const dx = t.x - prevX;
+      const dy = t.y - prevY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const steps = Math.max(4, Math.floor(dist * 2));
+      for (let i = 0; i < steps; i++) {
+        const frac = i / steps;
+        const px = prevX + dx * frac + (Math.random() - 0.5) * 0.4;
+        const py = prevY + dy * frac + (Math.random() - 0.5) * 0.4;
+        this.spawnParticle(px, py, 0, (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, 0, 0.3, 0xffee44, 0.05);
+      }
+
+      // Pop a balloon
+      this.popEnemyBalloon(t);
+      this.spawnBurst(t.x, t.y, 0xffee44, 8);
+
+      prevX = t.x;
+      prevY = t.y;
+    }
+
+    // Big flash at player
+    this.spawnBurst(state.playerX, state.playerY, 0xffee44, 16);
+    this.triggerScreenFlash(0xffee44, 0.2);
   }
 
   private updateActivePowerUps(dt: number): void {

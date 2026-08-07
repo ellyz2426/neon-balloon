@@ -272,6 +272,7 @@ export class UISystem extends createSystem({}) {
       const icons: Record<string, string> = {
         'shield': 'SHIELD', 'speed': 'SPEED', 'lightning-immunity': 'IMMUNE',
         'magnet': 'MAGNET', 'extra-balloon': 'EXTRA', 'freeze': 'FREEZE',
+        'chain-lightning': 'CHAIN⚡',
       };
       return `${icons[p.type] || p.type} ${Math.ceil(p.remaining)}s`;
     }).join(' | ');
