@@ -90,6 +90,11 @@
     font-size: 10;
     color: rgba(255, 100, 100, 0.8);
   }
+  .milestone-text {
+    font-size: 13;
+    color: rgba(255, 220, 100, 0.9);
+    text-align: center;
+  }
 </style>
 <Panel class="root">
   <div class="top-row">
@@ -119,4 +124,5 @@
       <div class="boss-bar-fill" id="boss-bar-fill"></div>
     </div>
   </div>
+  <div class="milestone-text" id="milestone"></div>
 </Panel>

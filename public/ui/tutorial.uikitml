@@ -132,6 +132,8 @@
     <div class="tip">• Shoot bubbles to stun enemies temporarily!</div>
     <div class="tip">• Double-tap flap quickly for a boost flap!</div>
     <div class="tip">• Watch for green acid rain in later phases!</div>
+    <div class="tip">• Swarm bugs are fast but weak — combo them!</div>
+    <div class="tip">• Red danger zones deal damage — dodge or dash!</div>
   </div>
   <div class="btn" id="btn-tutorial-back">
     <div class="btn-text">GOT IT!</div>

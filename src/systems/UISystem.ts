@@ -331,6 +331,12 @@ export class UISystem extends createSystem({}) {
     } else {
       this.hudPanel.getElementById('boss-bar-container')?.setProperties({ visible: false });
     }
+
+    // Phase milestone name
+    const milestone = state.getPhaseMilestoneName();
+    this.hudPanel.getElementById('milestone')?.setProperties({
+      text: milestone || '',
+    });
   }
 
   private updateResults(): void {

@@ -34,7 +34,7 @@ import {
   type FishData, type LightningData, type PowerUpType,
   type IcicleData, type WindZoneData, type BonusItemData,
   type ScoreDropData, type WhirlpoolData, type FormationType,
-  type BubbleProjectile, type AcidDrop,
+  type BubbleProjectile, type AcidDrop, type DangerZoneData,
 } from '../game-state.js';
 import { AudioSystem } from './AudioSystem.js';
 
@@ -154,6 +154,9 @@ export class GameSystem extends createSystem({}) {
 
   // Acid rain tracking
   private acidRainSpawnTimer = 0;
+
+  // Danger zone tracking
+  private dangerZoneSpawnTimer = 0;
 
   // Formation spawning
   private nextFormation: FormationType = 'none';
@@ -430,6 +433,7 @@ export class GameSystem extends createSystem({}) {
       this.updateDash(sDt);
       this.updateBubbles(sDt);
       this.updateAcidRain(sDt);
+      this.updateDangerZones(sDt, time);
       this.checkPhaseComplete();
       this.handleXRInput(sDt);
     }
@@ -686,14 +690,15 @@ export class GameSystem extends createSystem({}) {
 
   // === ENEMIES ===
 
-  private spawnEnemy(type: 'basic' | 'chaser' | 'dodger' | 'boss' | 'bomber' | 'magnet' | 'teleporter'): void {
+  private spawnEnemy(type: 'basic' | 'chaser' | 'dodger' | 'boss' | 'bomber' | 'magnet' | 'teleporter' | 'swarm'): void {
     const side = Math.random() > 0.5 ? 1 : -1;
     const balloons = type === 'boss' ? 4 :
                      type === 'magnet' ? 2 :
                      type === 'bomber' ? 2 :
                      type === 'teleporter' ? 1 :
                      type === 'chaser' ? 2 :
-                     type === 'dodger' ? 1 : 2;
+                     type === 'dodger' ? 1 :
+                     type === 'swarm' ? 1 : 2;
 
     const spawnY = ARENA.PLAYER_START_Y + Math.random() * 6;
     const spawnX = side * (ARENA.MAX_X + 1);
@@ -702,7 +707,8 @@ export class GameSystem extends createSystem({}) {
     const warningColor = type === 'boss' ? 0xff0000 :
                          type === 'magnet' ? 0x4488ff :
                          type === 'teleporter' ? 0xaa44ff :
-                         type === 'bomber' ? 0xff88ff : 0xff8844;
+                         type === 'bomber' ? 0xff88ff :
+                         type === 'swarm' ? 0x88ff44 : 0xff8844;
     for (let i = 0; i < 4; i++) {
       this.spawnParticle(
         spawnX, spawnY + (i - 1.5) * 0.5, 0,
@@ -745,13 +751,15 @@ export class GameSystem extends createSystem({}) {
                       e.type === 'chaser' ? 0x884400 :
                       e.type === 'dodger' ? 0x008844 :
                       e.type === 'magnet' ? 0x444488 :
-                      e.type === 'teleporter' ? 0x552288 : 0x664444;
+                      e.type === 'teleporter' ? 0x552288 :
+                      e.type === 'swarm' ? 0x448800 : 0x664444;
     const emissiveColor = e.type === 'boss' ? NEON_RED :
                           e.type === 'bomber' ? NEON_PINK :
                           e.type === 'chaser' ? NEON_ORANGE :
                           e.type === 'dodger' ? NEON_GREEN :
                           e.type === 'magnet' ? NEON_BLUE :
-                          e.type === 'teleporter' ? new Color(0xaa44ff) : new Color(0x884444);
+                          e.type === 'teleporter' ? new Color(0xaa44ff) :
+                          e.type === 'swarm' ? new Color(0x88ff44) : new Color(0x884444);
 
     const bodyMat = new MeshStandardMaterial({
       color: bodyColor, emissive: emissiveColor, emissiveIntensity: 0.3,
@@ -803,6 +811,22 @@ export class GameSystem extends createSystem({}) {
       });
       const portalRing = new Mesh(new TorusGeometry(0.4 * bodyScale, 0.04, 8, 16), portalMat);
       group.add(portalRing);
+    } else if (e.type === 'swarm') {
+      // Swarm: tiny fast enemy — small sphere with buzzing wing accent
+      body = new Mesh(new SphereGeometry(0.18 * bodyScale, 6, 5), bodyMat);
+      // Tiny wings (insect-like)
+      const wingMat = new MeshStandardMaterial({
+        color: 0x88ff44, emissive: new Color(0x88ff44), emissiveIntensity: 0.5,
+        transparent: true, opacity: 0.5,
+      });
+      const wingL = new Mesh(new PlaneGeometry(0.2, 0.1), wingMat);
+      wingL.position.set(-0.18, 0.1, 0);
+      wingL.rotation.z = 0.3;
+      group.add(wingL);
+      const wingR = new Mesh(new PlaneGeometry(0.2, 0.1), wingMat);
+      wingR.position.set(0.18, 0.1, 0);
+      wingR.rotation.z = -0.3;
+      group.add(wingR);
     } else {
       // Basic: standard sphere
       body = new Mesh(new SphereGeometry(0.3 * bodyScale, 8, 6), bodyMat);
@@ -987,12 +1011,21 @@ export class GameSystem extends createSystem({}) {
           // Teleporter appears from Phase 8+
           const teleChance = state.currentPhase >= 8 ?
             (state.difficulty === 'hard' ? 0.15 : 0.1) : 0;
+          // Swarm appears from Phase 10+, spawns in packs
+          const swarmChance = state.currentPhase >= 10 ?
+            (state.difficulty === 'hard' ? 0.18 : 0.12) : 0;
           const type = r < bomberChance ? 'bomber' :
                        r < bomberChance + magnetChance ? 'magnet' :
                        r < bomberChance + magnetChance + teleChance ? 'teleporter' :
-                       r < bomberChance + magnetChance + teleChance + 0.15 ? 'dodger' :
-                       r < bomberChance + magnetChance + teleChance + 0.4 ? 'chaser' : 'basic';
+                       r < bomberChance + magnetChance + teleChance + swarmChance ? 'swarm' :
+                       r < bomberChance + magnetChance + teleChance + swarmChance + 0.15 ? 'dodger' :
+                       r < bomberChance + magnetChance + teleChance + swarmChance + 0.4 ? 'chaser' : 'basic';
           this.spawnEnemy(type);
+          // Swarm pack: spawn 2 extra swarm alongside
+          if (type === 'swarm') {
+            setTimeout(() => this.spawnEnemy('swarm'), 200);
+            setTimeout(() => this.spawnEnemy('swarm'), 400);
+          }
         }
       }
     }
@@ -1009,7 +1042,7 @@ export class GameSystem extends createSystem({}) {
         continue;
       }
 
-      const speed = (e.type === 'chaser' ? 4 : e.type === 'dodger' ? 5 : e.type === 'bomber' ? 3.5 : e.type === 'magnet' ? 3 : e.type === 'teleporter' ? 4.5 : e.type === 'boss' ? 2.5 : 3) * diffMult;
+      const speed = (e.type === 'chaser' ? 4 : e.type === 'dodger' ? 5 : e.type === 'bomber' ? 3.5 : e.type === 'magnet' ? 3 : e.type === 'teleporter' ? 4.5 : e.type === 'swarm' ? 6 : e.type === 'boss' ? 2.5 : 3) * diffMult;
 
       if (e.balloons > 0) {
         // Flying AI
@@ -1102,6 +1135,22 @@ export class GameSystem extends createSystem({}) {
               e.x = MathUtils.clamp(e.x, ARENA.MIN_X + 1, ARENA.MAX_X - 1);
               // Teleport arrival particles
               this.spawnBurst(e.x, e.y, 0xaa44ff, 12);
+            }
+          } else if (e.type === 'swarm') {
+            // Swarm: very fast, erratic movement, zigzag toward player
+            const dx = state.playerX - e.x;
+            const dy = state.playerY - e.y;
+            e.vx += Math.sign(dx) * speed * 0.35;
+            e.vy += Math.sign(dy) * speed * 0.25;
+            // Zigzag: add oscillating perpendicular force
+            const zigzag = Math.sin(time * 12 + e.id * 2) * speed * 0.4;
+            e.vx += zigzag * dt * 8;
+            // Buzzing vertical oscillation
+            e.vy += Math.cos(time * 15 + e.id * 3) * 1.5;
+            // Wing flutter visual: scale oscillation on mesh
+            if (e.mesh) {
+              const flutter = 0.85 + Math.sin(time * 25 + e.id) * 0.15;
+              e.mesh.scale.set(flutter, flutter, flutter);
             }
           } else {
             // Basic: wander
@@ -1244,7 +1293,7 @@ export class GameSystem extends createSystem({}) {
     state.phaseEnemiesDefeated++;
     state.addCombo();
 
-    const points = e.type === 'boss' ? 2000 : e.type === 'magnet' ? 600 : e.type === 'teleporter' ? 700 : e.type === 'chaser' ? 500 : e.type === 'dodger' ? 300 : 200;
+    const points = e.type === 'boss' ? 2000 : e.type === 'magnet' ? 600 : e.type === 'teleporter' ? 700 : e.type === 'chaser' ? 500 : e.type === 'dodger' ? 300 : e.type === 'swarm' ? 400 : 200;
     state.addScore(points);
 
     // Spawn score drop
@@ -1274,6 +1323,9 @@ export class GameSystem extends createSystem({}) {
           0.08 + Math.random() * 0.06,
         );
       }
+    } else if (e.type === 'swarm') {
+      this.spawnBurst(e.x, e.y, 0x88ff44, 6);
+      this.audio?.playSwarmBuzz();
     } else {
       this.spawnBurst(e.x, e.y, 0xff8844, 10);
       this.audio?.playEnemyDefeat();
@@ -2962,6 +3014,12 @@ export class GameSystem extends createSystem({}) {
     }
     state.acidDrops = [];
     this.acidRainSpawnTimer = 0;
+    // Clean danger zones
+    for (const dz of state.dangerZones) {
+      if (dz.mesh) this.world.scene.remove(dz.mesh);
+    }
+    state.dangerZones = [];
+    this.dangerZoneSpawnTimer = 0;
 
     this.generatePlatforms();
 
@@ -3997,6 +4055,127 @@ export class GameSystem extends createSystem({}) {
     state.acidDrops.push(drop);
   }
 
+  // === DANGER ZONES ===
+
+  private updateDangerZones(dt: number, time: number): void {
+    // Only active Phase 8+
+    if (state.currentPhase < 8) return;
+
+    // Spawn danger zones periodically
+    this.dangerZoneSpawnTimer -= dt;
+    const interval = Math.max(12 - (state.currentPhase - 8) * 0.5, 5);
+    if (this.dangerZoneSpawnTimer <= 0 && state.dangerZones.length < 3) {
+      this.dangerZoneSpawnTimer = interval + Math.random() * 4;
+      this.spawnDangerZone();
+    }
+
+    for (let i = state.dangerZones.length - 1; i >= 0; i--) {
+      const dz = state.dangerZones[i];
+      if (!dz.active) {
+        if (dz.mesh) { this.world.scene.remove(dz.mesh); dz.mesh = null; }
+        state.dangerZones.splice(i, 1);
+        continue;
+      }
+
+      dz.timer -= dt;
+      if (dz.timer <= 0) {
+        dz.active = false;
+        // Dissipation burst
+        this.spawnBurst(dz.x, dz.y, 0xff4444, 12);
+        continue;
+      }
+
+      // Warning phase: first 1.5 seconds are a warning (no damage)
+      if (dz.warningTimer > 0) {
+        dz.warningTimer -= dt;
+        if (dz.mesh) {
+          // Pulse warning
+          const mat = (dz.mesh as Mesh).material as MeshStandardMaterial;
+          mat.opacity = 0.1 + Math.sin(dz.warningTimer * 10) * 0.08;
+          mat.emissiveIntensity = 0.3 + Math.sin(dz.warningTimer * 10) * 0.2;
+        }
+        continue;
+      }
+
+      // Active damage zone: pulse visual
+      if (dz.mesh) {
+        const mat = (dz.mesh as Mesh).material as MeshStandardMaterial;
+        const pulse = 0.2 + Math.sin(time * 6) * 0.1;
+        mat.opacity = pulse;
+        mat.emissiveIntensity = 0.5 + Math.sin(time * 8) * 0.3;
+        // Scale pulsing
+        const sPulse = 1 + Math.sin(time * 4) * 0.05;
+        dz.mesh.scale.set(sPulse, sPulse, sPulse);
+      }
+
+      // Damage tick (every 0.5s)
+      dz.damageTimer -= dt;
+      if (dz.damageTimer <= 0) {
+        dz.damageTimer = 0.5;
+
+        // Emit hazard particles
+        for (let j = 0; j < 4; j++) {
+          const angle = Math.random() * Math.PI * 2;
+          this.spawnParticle(
+            dz.x + Math.cos(angle) * dz.radius * 0.8,
+            dz.y + Math.sin(angle) * dz.radius * 0.8,
+            0,
+            Math.cos(angle) * 1.5, Math.sin(angle) * 1.5, 0,
+            0.6, 0xff2222, 0.04,
+          );
+        }
+
+        // Player damage check
+        if (state.playerAlive && state.playerInvincible <= 0) {
+          const dx = state.playerX - dz.x;
+          const dy = state.playerY - dz.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < dz.radius) {
+            this.popPlayerBalloon();
+            state.shakeTimer = 0.15;
+            state.shakeIntensity = 0.2;
+            this.audio?.playHurt();
+          }
+        }
+      }
+    }
+  }
+
+  private spawnDangerZone(): void {
+    const x = (Math.random() - 0.5) * (ARENA.WIDTH - 4);
+    const y = ARENA.WATER_Y + 3 + Math.random() * (ARENA.HEIGHT - 6);
+    const radius = 1.5 + Math.random() * 1.5;
+    const duration = 6 + Math.random() * 4;
+
+    const dz: DangerZoneData = {
+      id: state.getId(),
+      x, y, z: 0,
+      radius,
+      timer: duration,
+      warningTimer: 1.5,
+      damageTimer: 0.5,
+      active: true,
+      mesh: null,
+    };
+
+    // Create circular danger zone visual
+    const mat = new MeshStandardMaterial({
+      color: 0xff0000,
+      emissive: new Color(0xff2222),
+      emissiveIntensity: 0.3,
+      transparent: true,
+      opacity: 0.1,
+      side: DoubleSide,
+    });
+    const geo = new RingGeometry(radius * 0.3, radius, 24);
+    const mesh = new Mesh(geo, mat);
+    mesh.position.set(x, y, 0.1);
+    this.world.scene.add(mesh);
+    dz.mesh = mesh;
+
+    state.dangerZones.push(dz);
+  }
+
   returnToMenu(): void {
     // Clean up everything
     for (const e of state.enemies) {
@@ -4054,6 +4233,12 @@ export class GameSystem extends createSystem({}) {
     }
     state.acidDrops = [];
     this.acidRainSpawnTimer = 0;
+    // Clean danger zones
+    for (const dz of state.dangerZones) {
+      if (dz.mesh) this.world.scene.remove(dz.mesh);
+    }
+    state.dangerZones = [];
+    this.dangerZoneSpawnTimer = 0;
     // Clean trail
     for (const t of this.trailNodes) {
       this.world.scene.remove(t.mesh);

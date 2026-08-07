@@ -209,6 +209,18 @@ export class AudioSystem extends createSystem({}) {
     this.playNoise(0.12, 0.05);
   }
 
+  playSwarmBuzz(): void {
+    this.playSfx(880, 'square', 0.04, 0.0);
+    this.playSfx(940, 'square', 0.03, 0.02);
+    this.playSfx(820, 'square', 0.03, 0.04);
+  }
+
+  playDangerZoneWarn(): void {
+    this.playSfx(200, 'sawtooth', 0.08, 0.0);
+    this.playSfx(180, 'sawtooth', 0.06, 0.15);
+    this.playSfx(160, 'sawtooth', 0.04, 0.3);
+  }
+
   private playSfx(freq: number, type: OscillatorType, vol: number, delay: number): void {
     if (!this.ctx || !this.sfxGain) return;
     const osc = this.ctx.createOscillator();

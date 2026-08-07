@@ -5,7 +5,7 @@
 
 export type GameMode = 'arcade' | 'balloon-trip' | 'survival';
 export type GamePhase = 'menu' | 'playing' | 'phase-complete' | 'game-over' | 'paused' | 'settings' | 'stats' | 'tutorial';
-export type EnemyType = 'basic' | 'chaser' | 'dodger' | 'boss' | 'bomber' | 'magnet' | 'teleporter';
+export type EnemyType = 'basic' | 'chaser' | 'dodger' | 'boss' | 'bomber' | 'magnet' | 'teleporter' | 'swarm';
 export type PowerUpType = 'shield' | 'speed' | 'extra-balloon' | 'lightning-immunity' | 'magnet' | 'freeze';
 export type Difficulty = 'easy' | 'normal' | 'hard';
 export type ColorTheme = 'neon-cyan' | 'neon-pink' | 'neon-green' | 'neon-gold';
@@ -32,6 +32,19 @@ export interface AcidDrop {
   warningTimer: number;
   mesh: import('@iwsdk/core').Object3D | null;
   warningMesh: import('@iwsdk/core').Object3D | null;
+}
+
+export interface DangerZoneData {
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+  radius: number;
+  timer: number;
+  warningTimer: number;
+  damageTimer: number;
+  active: boolean;
+  mesh: import('@iwsdk/core').Object3D | null;
 }
 
 export interface WhirlpoolData {
@@ -323,6 +336,9 @@ class GameState {
   // Acid rain
   acidDrops: AcidDrop[] = [];
 
+  // Danger zones (Phase 8+)
+  dangerZones: DangerZoneData[] = [];
+
   // Combo flash
   comboFlashTimer = 0;
 
@@ -437,6 +453,7 @@ class GameState {
     this.boostFlapAvailable = false;
     this.boostFlapWindow = 0;
     this.acidDrops = [];
+    this.dangerZones = [];
     this.comboFlashTimer = 0;
     this.phaseTransitionTimer = 0;
     this.shakeTimer = 0;
@@ -541,6 +558,20 @@ class GameState {
 
   isBonusPhase(): boolean {
     return this.currentPhase % 10 === 0;
+  }
+
+  getPhaseMilestoneName(): string {
+    const milestones: Record<number, string> = {
+      1: 'FIRST FLIGHT',
+      5: 'BOSS GAUNTLET',
+      10: 'BONUS BLITZ',
+      15: 'STORM RISING',
+      20: 'NEON INFERNO',
+      25: 'ULTIMATE BOSS',
+      30: 'ENDLESS SKY',
+      50: 'LEGENDARY',
+    };
+    return milestones[this.currentPhase] || '';
   }
 }
 
