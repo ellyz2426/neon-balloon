@@ -185,6 +185,11 @@ export class UISystem extends createSystem({}) {
       this.updateHUD();
     }
 
+    // Update pause info
+    if (state.phase === 'paused') {
+      this.updatePauseInfo();
+    }
+
     // Update results
     if (state.phase === 'game-over' || state.phase === 'phase-complete') {
       this.updateResults();
@@ -377,6 +382,17 @@ export class UISystem extends createSystem({}) {
       this.resultsPanel.getElementById('result-time')?.setProperties({ text: `${mins}:${secs.toString().padStart(2, '0')}` });
       this.resultsPanel.getElementById('btn-continue-text')?.setProperties({ text: 'NEXT PHASE' });
     }
+  }
+
+  private updatePauseInfo(): void {
+    if (!this.pausePanel) return;
+    const modeLabels: Record<string, string> = {
+      'arcade': 'Arcade', 'survival': 'Survival', 'balloon-trip': 'Balloon Trip',
+    };
+    const modeStr = modeLabels[state.mode] || 'Arcade';
+    this.pausePanel.getElementById('pause-info')?.setProperties({
+      text: `${modeStr} • Phase ${state.currentPhase} — Score: ${state.score}`,
+    });
   }
 
   private updateSettings(): void {

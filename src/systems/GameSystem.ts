@@ -686,11 +686,12 @@ export class GameSystem extends createSystem({}) {
 
   // === ENEMIES ===
 
-  private spawnEnemy(type: 'basic' | 'chaser' | 'dodger' | 'boss' | 'bomber' | 'magnet'): void {
+  private spawnEnemy(type: 'basic' | 'chaser' | 'dodger' | 'boss' | 'bomber' | 'magnet' | 'teleporter'): void {
     const side = Math.random() > 0.5 ? 1 : -1;
     const balloons = type === 'boss' ? 4 :
                      type === 'magnet' ? 2 :
                      type === 'bomber' ? 2 :
+                     type === 'teleporter' ? 1 :
                      type === 'chaser' ? 2 :
                      type === 'dodger' ? 1 : 2;
 
@@ -700,6 +701,7 @@ export class GameSystem extends createSystem({}) {
     // Spawn warning indicator particles at entrance
     const warningColor = type === 'boss' ? 0xff0000 :
                          type === 'magnet' ? 0x4488ff :
+                         type === 'teleporter' ? 0xaa44ff :
                          type === 'bomber' ? 0xff88ff : 0xff8844;
     for (let i = 0; i < 4; i++) {
       this.spawnParticle(
@@ -742,12 +744,14 @@ export class GameSystem extends createSystem({}) {
                       e.type === 'bomber' ? 0x884488 :
                       e.type === 'chaser' ? 0x884400 :
                       e.type === 'dodger' ? 0x008844 :
-                      e.type === 'magnet' ? 0x444488 : 0x664444;
+                      e.type === 'magnet' ? 0x444488 :
+                      e.type === 'teleporter' ? 0x552288 : 0x664444;
     const emissiveColor = e.type === 'boss' ? NEON_RED :
                           e.type === 'bomber' ? NEON_PINK :
                           e.type === 'chaser' ? NEON_ORANGE :
                           e.type === 'dodger' ? NEON_GREEN :
-                          e.type === 'magnet' ? NEON_BLUE : new Color(0x884444);
+                          e.type === 'magnet' ? NEON_BLUE :
+                          e.type === 'teleporter' ? new Color(0xaa44ff) : new Color(0x884444);
 
     const bodyMat = new MeshStandardMaterial({
       color: bodyColor, emissive: emissiveColor, emissiveIntensity: 0.3,
@@ -788,6 +792,17 @@ export class GameSystem extends createSystem({}) {
       const armorRing = new Mesh(new TorusGeometry(0.38 * bodyScale, 0.06, 6, 12), armorMat);
       armorRing.rotation.x = Math.PI / 2;
       group.add(armorRing);
+    } else if (e.type === 'teleporter') {
+      // Teleporter: diamond-shaped body with glowing portal ring
+      body = new Mesh(new BoxGeometry(0.3 * bodyScale, 0.4 * bodyScale, 0.3 * bodyScale), bodyMat);
+      body.rotation.z = Math.PI / 4;
+      body.rotation.x = Math.PI / 6;
+      const portalMat = new MeshStandardMaterial({
+        color: 0x442288, emissive: new Color(0xaa44ff), emissiveIntensity: 0.8,
+        transparent: true, opacity: 0.6,
+      });
+      const portalRing = new Mesh(new TorusGeometry(0.4 * bodyScale, 0.04, 8, 16), portalMat);
+      group.add(portalRing);
     } else {
       // Basic: standard sphere
       body = new Mesh(new SphereGeometry(0.3 * bodyScale, 8, 6), bodyMat);
@@ -969,10 +984,14 @@ export class GameSystem extends createSystem({}) {
           // Magnet appears from Phase 5+
           const magnetChance = state.currentPhase >= 5 ?
             (state.difficulty === 'hard' ? 0.15 : 0.08) : 0;
+          // Teleporter appears from Phase 8+
+          const teleChance = state.currentPhase >= 8 ?
+            (state.difficulty === 'hard' ? 0.15 : 0.1) : 0;
           const type = r < bomberChance ? 'bomber' :
                        r < bomberChance + magnetChance ? 'magnet' :
-                       r < bomberChance + magnetChance + 0.15 ? 'dodger' :
-                       r < bomberChance + magnetChance + 0.4 ? 'chaser' : 'basic';
+                       r < bomberChance + magnetChance + teleChance ? 'teleporter' :
+                       r < bomberChance + magnetChance + teleChance + 0.15 ? 'dodger' :
+                       r < bomberChance + magnetChance + teleChance + 0.4 ? 'chaser' : 'basic';
           this.spawnEnemy(type);
         }
       }
@@ -990,7 +1009,7 @@ export class GameSystem extends createSystem({}) {
         continue;
       }
 
-      const speed = (e.type === 'chaser' ? 4 : e.type === 'dodger' ? 5 : e.type === 'bomber' ? 3.5 : e.type === 'magnet' ? 3 : e.type === 'boss' ? 2.5 : 3) * diffMult;
+      const speed = (e.type === 'chaser' ? 4 : e.type === 'dodger' ? 5 : e.type === 'bomber' ? 3.5 : e.type === 'magnet' ? 3 : e.type === 'teleporter' ? 4.5 : e.type === 'boss' ? 2.5 : 3) * diffMult;
 
       if (e.balloons > 0) {
         // Flying AI
@@ -1063,6 +1082,26 @@ export class GameSystem extends createSystem({}) {
             // Hard: boss is more aggressive
             if (state.difficulty === 'hard' && Math.random() < 0.15) {
               e.vx += Math.sign(dx) * speed * 0.4;
+            }
+          } else if (e.type === 'teleporter') {
+            // Teleporter: moves toward player, periodically teleports to a random position
+            const dx = state.playerX - e.x;
+            const dy = state.playerY - e.y;
+            e.vx += Math.sign(dx) * speed * 0.15;
+            if (dy > 1) e.vy += 2;
+            // Teleport: ~20% chance each AI tick (every 0.5-2s)
+            const teleChance = state.difficulty === 'hard' ? 0.3 : 0.2;
+            if (Math.random() < teleChance) {
+              // Teleport departure particles
+              this.spawnBurst(e.x, e.y, 0xaa44ff, 12);
+              this.audio?.playLightning();
+              // Move to new position near player
+              e.x = state.playerX + (Math.random() - 0.5) * 8;
+              e.y = Math.max(ARENA.WATER_Y + 2, Math.min(ARENA.MAX_Y - 2,
+                state.playerY + (Math.random() - 0.5) * 6));
+              e.x = MathUtils.clamp(e.x, ARENA.MIN_X + 1, ARENA.MAX_X - 1);
+              // Teleport arrival particles
+              this.spawnBurst(e.x, e.y, 0xaa44ff, 12);
             }
           } else {
             // Basic: wander
@@ -1168,6 +1207,26 @@ export class GameSystem extends createSystem({}) {
           }
         }
 
+        // Teleporter: portal ring rotation + periodic shimmer particles
+        if (e.type === 'teleporter' && !frozen) {
+          const children = (e.mesh as Group).children;
+          for (let c = 0; c < children.length; c++) {
+            const child = children[c];
+            if (child instanceof Mesh && child.geometry?.type === 'TorusGeometry') {
+              child.rotation.x = time * 4;
+              child.rotation.y = time * 2;
+            }
+          }
+          // Shimmer particles around body
+          if (Math.random() < 0.1) {
+            this.spawnParticle(
+              e.x + (Math.random() - 0.5) * 0.8, e.y + (Math.random() - 0.5) * 0.8, 0,
+              (Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, 0,
+              0.4, 0xaa44ff, 0.035,
+            );
+          }
+        }
+
         // Balloon bob
         for (let i = 0; i < e.balloonMeshes.length; i++) {
           const bm = e.balloonMeshes[i];
@@ -1185,7 +1244,7 @@ export class GameSystem extends createSystem({}) {
     state.phaseEnemiesDefeated++;
     state.addCombo();
 
-    const points = e.type === 'boss' ? 2000 : e.type === 'magnet' ? 600 : e.type === 'chaser' ? 500 : e.type === 'dodger' ? 300 : 200;
+    const points = e.type === 'boss' ? 2000 : e.type === 'magnet' ? 600 : e.type === 'teleporter' ? 700 : e.type === 'chaser' ? 500 : e.type === 'dodger' ? 300 : 200;
     state.addScore(points);
 
     // Spawn score drop
