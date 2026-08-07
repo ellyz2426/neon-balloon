@@ -34,6 +34,7 @@ import {
   type FishData, type LightningData, type PowerUpType,
   type IcicleData, type WindZoneData, type BonusItemData,
   type ScoreDropData, type WhirlpoolData, type FormationType,
+  type BubbleProjectile, type AcidDrop,
 } from '../game-state.js';
 import { AudioSystem } from './AudioSystem.js';
 
@@ -150,6 +151,9 @@ export class GameSystem extends createSystem({}) {
 
   // Whirlpool tracking
   private whirlpoolSpawnTimer = 0;
+
+  // Acid rain tracking
+  private acidRainSpawnTimer = 0;
 
   // Formation spawning
   private nextFormation: FormationType = 'none';
@@ -381,6 +385,10 @@ export class GameSystem extends createSystem({}) {
           && state.phase === 'playing' && state.dashCooldown <= 0) {
         this.triggerDash();
       }
+      // Bubble attack on F
+      if (e.code === 'KeyF' && state.phase === 'playing') {
+        this.triggerBubbleAttack();
+      }
     });
     window.addEventListener('keyup', (e) => {
       this.keysDown.delete(e.code);
@@ -420,6 +428,8 @@ export class GameSystem extends createSystem({}) {
       this.updateScoreDrops(sDt, time);
       this.updateWhirlpools(sDt, time);
       this.updateDash(sDt);
+      this.updateBubbles(sDt);
+      this.updateAcidRain(sDt);
       this.checkPhaseComplete();
       this.handleXRInput(sDt);
     }
@@ -511,14 +521,33 @@ export class GameSystem extends createSystem({}) {
     if (this.flapPressed && state.playerBalloons > 0) {
       this.flapPressed = false;
       if (this.flapCooldown <= 0) {
-        state.playerVY = Math.min(state.playerVY + 4, 8);
-        this.flapCooldown = 0.12;
-        // Arm flap animation
-        this.animateFlap();
+        // Check for boost flap (double-flap within window while rising)
+        if (state.boostFlapAvailable && state.boostFlapWindow > 0 && state.playerVY > 0) {
+          state.playerVY = Math.min(state.playerVY + 6, 10);
+          state.boostFlapAvailable = false;
+          state.boostFlapWindow = 0;
+          this.flapCooldown = 0.12;
+          this.animateBoostFlap();
+        } else {
+          state.playerVY = Math.min(state.playerVY + 4, 8);
+          this.flapCooldown = 0.12;
+          // Start boost flap window
+          state.boostFlapAvailable = true;
+          state.boostFlapWindow = 0.3;
+          this.animateFlap();
+        }
       }
     }
     this.flapPressed = false;
     if (this.flapCooldown > 0) this.flapCooldown -= dt;
+
+    // Update boost flap window
+    if (state.boostFlapWindow > 0) {
+      state.boostFlapWindow -= dt;
+      if (state.boostFlapWindow <= 0) {
+        state.boostFlapAvailable = false;
+      }
+    }
 
     // Continuous flap with held key
     if ((this.keysDown.has('Space') || this.keysDown.has('KeyW') || this.keysDown.has('ArrowUp'))
@@ -541,9 +570,21 @@ export class GameSystem extends createSystem({}) {
       state.playerFacing = state.playerVX > 0 ? 1 : -1;
     }
 
-    // Wrap horizontally
-    if (state.playerX < ARENA.MIN_X - 1) state.playerX = ARENA.MAX_X + 1;
-    if (state.playerX > ARENA.MAX_X + 1) state.playerX = ARENA.MIN_X - 1;
+    // Wrap horizontally with particle trail
+    if (state.playerX < ARENA.MIN_X - 1) {
+      const oldX = state.playerX;
+      const oldY = state.playerY;
+      state.playerX = ARENA.MAX_X + 1;
+      this.spawnWrapTrail(oldX, oldY);
+      this.spawnWrapArrival(state.playerX, state.playerY);
+    }
+    if (state.playerX > ARENA.MAX_X + 1) {
+      const oldX = state.playerX;
+      const oldY = state.playerY;
+      state.playerX = ARENA.MIN_X - 1;
+      this.spawnWrapTrail(oldX, oldY);
+      this.spawnWrapArrival(state.playerX, state.playerY);
+    }
 
     // Ceiling
     if (state.playerY > ARENA.MAX_Y - 1) {
@@ -561,6 +602,11 @@ export class GameSystem extends createSystem({}) {
     // Invincibility timer
     if (state.playerInvincible > 0) {
       state.playerInvincible -= dt;
+    }
+
+    // Bubble attack cooldown
+    if (state.bubbleCooldown > 0) {
+      state.bubbleCooldown -= dt;
     }
 
     // Update mesh
@@ -2842,6 +2888,21 @@ export class GameSystem extends createSystem({}) {
     state.freezeTimer = 0;
     state.dashCooldown = 0;
     state.dashTimer = 0;
+    state.bubbleCooldown = 0;
+    state.boostFlapAvailable = false;
+    state.boostFlapWindow = 0;
+    // Clean bubbles
+    for (const b of state.bubbles) {
+      if (b.mesh) this.world.scene.remove(b.mesh);
+    }
+    state.bubbles = [];
+    // Clean acid drops
+    for (const a of state.acidDrops) {
+      if (a.mesh) this.world.scene.remove(a.mesh);
+      if (a.warningMesh) this.world.scene.remove(a.warningMesh);
+    }
+    state.acidDrops = [];
+    this.acidRainSpawnTimer = 0;
 
     this.generatePlatforms();
 
@@ -2938,6 +2999,11 @@ export class GameSystem extends createSystem({}) {
       // A button = dash
       if (right.getButtonDown?.('a-button')) {
         this.triggerDash();
+      }
+
+      // B button = bubble attack
+      if (right.getButtonDown?.('b-button')) {
+        this.triggerBubbleAttack();
       }
 
       // Thumbstick = move
@@ -3569,6 +3635,309 @@ export class GameSystem extends createSystem({}) {
 
   // === PUBLIC METHODS (for UISystem) ===
 
+  // === BUBBLE ATTACK ===
+
+  private triggerBubbleAttack(): void {
+    if (state.bubbleCooldown > 0 || !state.playerAlive || state.phase !== 'playing') return;
+
+    state.bubbleCooldown = 3;
+    const dir = state.playerFacing;
+    const bubble: BubbleProjectile = {
+      id: state.getId(),
+      x: state.playerX + dir * 0.5,
+      y: state.playerY,
+      z: 0,
+      vx: dir * 12,
+      active: true,
+      timer: 3,
+      mesh: null,
+    };
+
+    // Create bubble mesh
+    const mat = new MeshStandardMaterial({
+      color: 0x88eeff,
+      emissive: new Color(0x88eeff),
+      emissiveIntensity: 0.6,
+      transparent: true,
+      opacity: 0.7,
+    });
+    const mesh = new Mesh(new SphereGeometry(0.25, 10, 8), mat);
+    mesh.position.set(bubble.x, bubble.y, bubble.z);
+    this.world.scene.add(mesh);
+    bubble.mesh = mesh;
+
+    state.bubbles.push(bubble);
+    this.audio?.playBubble();
+
+    // Spawn launch particles
+    for (let i = 0; i < 4; i++) {
+      this.spawnParticle(
+        bubble.x, bubble.y, 0,
+        dir * (1 + Math.random()), (Math.random() - 0.5) * 2, 0,
+        0.2, 0x88eeff, 0.03,
+      );
+    }
+  }
+
+  private updateBubbles(dt: number): void {
+    for (let i = state.bubbles.length - 1; i >= 0; i--) {
+      const b = state.bubbles[i];
+      if (!b.active) {
+        if (b.mesh) { this.world.scene.remove(b.mesh); b.mesh = null; }
+        state.bubbles.splice(i, 1);
+        continue;
+      }
+
+      b.timer -= dt;
+      b.x += b.vx * dt;
+
+      // Update mesh
+      if (b.mesh) {
+        b.mesh.position.set(b.x, b.y, b.z);
+        b.mesh.scale.setScalar(0.8 + Math.sin(b.timer * 12) * 0.1);
+      }
+
+      // Bubble trail particles
+      if (Math.random() < 0.3) {
+        this.spawnParticle(b.x, b.y, 0, (Math.random() - 0.5), (Math.random() - 0.5), 0, 0.15, 0x88eeff, 0.02);
+      }
+
+      // Out of bounds or expired
+      if (b.x < ARENA.MIN_X - 2 || b.x > ARENA.MAX_X + 2 || b.timer <= 0) {
+        b.active = false;
+        this.spawnBurst(b.x, b.y, 0x88eeff, 5);
+        continue;
+      }
+
+      // Collision with enemies — stun for 2s
+      for (const e of state.enemies) {
+        if (!e.alive) continue;
+        const dx = b.x - e.x;
+        const dy = b.y - e.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 0.8) {
+          b.active = false;
+          // Stun enemy: freeze in place for 2s
+          e.vx = 0;
+          e.vy = 0;
+          e.aiTimer = 2; // Prevent AI from acting
+          e.flapCooldown = 2; // Prevent flapping
+          this.spawnBurst(e.x, e.y, 0x88eeff, 10);
+          this.audio?.playBubble();
+          break;
+        }
+      }
+    }
+  }
+
+  // === SCREEN WRAP PARTICLES ===
+
+  private spawnWrapTrail(x: number, y: number): void {
+    // Trail of fading particles at old position
+    const tc = state.getThemeColors();
+    for (let i = 0; i < 8; i++) {
+      this.spawnParticle(
+        x + (Math.random() - 0.5) * 0.5,
+        y + (Math.random() - 0.5) * 1.0,
+        0,
+        (Math.random() - 0.5) * 2,
+        (Math.random() - 0.5) * 2,
+        0,
+        0.4 + Math.random() * 0.3,
+        tc.primary,
+        0.05 + Math.random() * 0.04,
+      );
+    }
+  }
+
+  private spawnWrapArrival(x: number, y: number): void {
+    // Sparkle burst at new position
+    const tc = state.getThemeColors();
+    for (let i = 0; i < 10; i++) {
+      const angle = (i / 10) * Math.PI * 2;
+      const speed = 1.5 + Math.random() * 2;
+      this.spawnParticle(
+        x + Math.cos(angle) * 0.3,
+        y + Math.sin(angle) * 0.3,
+        0,
+        Math.cos(angle) * speed,
+        Math.sin(angle) * speed,
+        0,
+        0.3 + Math.random() * 0.2,
+        tc.accent,
+        0.04 + Math.random() * 0.04,
+      );
+    }
+  }
+
+  // === BOOST FLAP ===
+
+  private animateBoostFlap(): void {
+    // Bigger burst of particles for boost flap
+    const tc = state.getThemeColors();
+    for (let i = 0; i < 12; i++) {
+      const angle = (i / 12) * Math.PI * 2;
+      this.spawnParticle(
+        state.playerX + Math.cos(angle) * 0.3,
+        state.playerY - 0.3 + Math.sin(angle) * 0.3,
+        0,
+        Math.cos(angle) * 2, Math.sin(angle) * 2 - 1, 0,
+        0.4,
+        tc.secondary,
+        0.06 + Math.random() * 0.04,
+      );
+    }
+    // Extra upward particles
+    for (let i = 0; i < 5; i++) {
+      this.spawnParticle(
+        state.playerX + (Math.random() - 0.5) * 0.8,
+        state.playerY - 0.5,
+        0,
+        (Math.random() - 0.5) * 1.5, -2 - Math.random() * 2, 0,
+        0.3,
+        0xffffff,
+        0.04,
+      );
+    }
+    this.audio?.playBoostFlap();
+  }
+
+  // === ACID RAIN ===
+
+  private updateAcidRain(dt: number): void {
+    // Only active in phase 7+
+    if (state.currentPhase < 7) return;
+
+    // Spawn acid drops periodically
+    this.acidRainSpawnTimer -= dt;
+    const interval = Math.max(3 - (state.currentPhase - 7) * 0.2, 1.0);
+    if (this.acidRainSpawnTimer <= 0 && state.acidDrops.length < 6) {
+      this.acidRainSpawnTimer = interval + Math.random() * 2;
+      this.spawnAcidDrop();
+    }
+
+    for (let i = state.acidDrops.length - 1; i >= 0; i--) {
+      const drop = state.acidDrops[i];
+      if (!drop.active) {
+        if (drop.mesh) { this.world.scene.remove(drop.mesh); drop.mesh = null; }
+        if (drop.warningMesh) { this.world.scene.remove(drop.warningMesh); drop.warningMesh = null; }
+        state.acidDrops.splice(i, 1);
+        continue;
+      }
+
+      // Warning phase
+      if (drop.warningTimer > 0) {
+        drop.warningTimer -= dt;
+        // Green drip warning particles
+        if (Math.random() < 0.4) {
+          this.spawnParticle(
+            drop.x + (Math.random() - 0.5) * 0.3,
+            ARENA.MAX_Y - 0.5,
+            0,
+            0, -0.5, 0,
+            0.3, 0x44ff44, 0.02,
+          );
+        }
+        // Pulse warning mesh
+        if (drop.warningMesh) {
+          drop.warningMesh.scale.setScalar(0.15 + Math.sin(drop.warningTimer * 12) * 0.05);
+        }
+        if (drop.warningTimer <= 0) {
+          // Start falling
+          drop.vy = -3;
+          if (drop.warningMesh) {
+            this.world.scene.remove(drop.warningMesh);
+            drop.warningMesh = null;
+          }
+          // Create drop mesh
+          const mat = new MeshStandardMaterial({
+            color: 0x44ff44,
+            emissive: new Color(0x44ff44),
+            emissiveIntensity: 0.8,
+            transparent: true,
+            opacity: 0.85,
+          });
+          const mesh = new Mesh(new SphereGeometry(0.2, 8, 6), mat);
+          mesh.position.set(drop.x, drop.y, drop.z);
+          this.world.scene.add(mesh);
+          drop.mesh = mesh;
+        }
+        continue;
+      }
+
+      // Falling
+      drop.vy -= 8 * dt; // accelerate
+      drop.y += drop.vy * dt;
+
+      // Update mesh
+      if (drop.mesh) {
+        drop.mesh.position.set(drop.x, drop.y, drop.z);
+        // Stretch vertically as it falls fast
+        const stretchY = Math.min(1 + Math.abs(drop.vy) * 0.05, 2);
+        drop.mesh.scale.set(1, stretchY, 1);
+      }
+
+      // Acid trail
+      if (Math.random() < 0.5) {
+        this.spawnParticle(drop.x, drop.y + 0.2, 0, (Math.random() - 0.5) * 0.3, 0.5, 0, 0.2, 0x66ff66, 0.02);
+      }
+
+      // Player collision
+      if (state.playerAlive && state.playerInvincible <= 0) {
+        const dx = state.playerX - drop.x;
+        const dy = state.playerY - drop.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 0.6) {
+          this.popPlayerBalloon();
+          drop.active = false;
+          this.spawnBurst(drop.x, drop.y, 0x44ff44, 8);
+          state.shakeTimer = 0.15;
+          state.shakeIntensity = 0.15;
+          this.audio?.playAcidRain();
+          continue;
+        }
+      }
+
+      // Hit water or floor
+      if (drop.y < ARENA.WATER_Y + 0.5) {
+        drop.active = false;
+        this.spawnBurst(drop.x, ARENA.WATER_Y + 0.5, 0x44ff44, 6);
+        this.audio?.playAcidRain();
+        continue;
+      }
+    }
+  }
+
+  private spawnAcidDrop(): void {
+    const x = (Math.random() - 0.5) * (ARENA.WIDTH - 2);
+    const drop: AcidDrop = {
+      id: state.getId(),
+      x,
+      y: ARENA.MAX_Y - 1,
+      z: 0,
+      vy: 0,
+      active: true,
+      warningTimer: 1.2,
+      mesh: null,
+      warningMesh: null,
+    };
+
+    // Create warning indicator at ceiling
+    const warnMat = new MeshStandardMaterial({
+      color: 0x44ff44,
+      emissive: new Color(0x44ff44),
+      emissiveIntensity: 1.0,
+      transparent: true,
+      opacity: 0.6,
+    });
+    const warnMesh = new Mesh(new SphereGeometry(0.15, 6, 4), warnMat);
+    warnMesh.position.set(x, ARENA.MAX_Y - 0.5, 0);
+    this.world.scene.add(warnMesh);
+    drop.warningMesh = warnMesh;
+
+    state.acidDrops.push(drop);
+  }
+
   returnToMenu(): void {
     // Clean up everything
     for (const e of state.enemies) {
@@ -3613,6 +3982,19 @@ export class GameSystem extends createSystem({}) {
     state.dashCooldown = 0;
     state.dashTimer = 0;
     state.comboFlashTimer = 0;
+    state.bubbleCooldown = 0;
+    // Clean bubbles
+    for (const b of state.bubbles) {
+      if (b.mesh) this.world.scene.remove(b.mesh);
+    }
+    state.bubbles = [];
+    // Clean acid drops
+    for (const a of state.acidDrops) {
+      if (a.mesh) this.world.scene.remove(a.mesh);
+      if (a.warningMesh) this.world.scene.remove(a.warningMesh);
+    }
+    state.acidDrops = [];
+    this.acidRainSpawnTimer = 0;
     // Clean trail
     for (const t of this.trailNodes) {
       this.world.scene.remove(t.mesh);

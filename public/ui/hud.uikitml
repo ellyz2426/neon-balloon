@@ -109,6 +109,7 @@
   <div class="mid-row">
     <div class="lives-text" id="lives">♥♥♥</div>
     <div class="dash-text" id="dash"></div>
+    <div class="dash-text" id="bubble"></div>
     <div class="powerup-text" id="powerup"></div>
     <div class="enemies-text" id="enemies">0 / 0</div>
   </div>

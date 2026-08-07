@@ -191,6 +191,24 @@ export class AudioSystem extends createSystem({}) {
     this.playSfx(200, 'sine', 0.04, 0.08);
   }
 
+  playBubble(): void {
+    this.playSfx(800, 'sine', 0.06, 0.0);
+    this.playSfx(1000, 'sine', 0.04, 0.04);
+    this.playSfx(600, 'sine', 0.03, 0.08);
+  }
+
+  playBoostFlap(): void {
+    this.playSfx(350, 'sine', 0.1, 0.0);
+    this.playSfx(520, 'sine', 0.08, 0.04);
+    this.playSfx(700, 'triangle', 0.06, 0.08);
+  }
+
+  playAcidRain(): void {
+    this.playSfx(300, 'sawtooth', 0.08, 0.0);
+    this.playSfx(250, 'sawtooth', 0.06, 0.06);
+    this.playNoise(0.12, 0.05);
+  }
+
   private playSfx(freq: number, type: OscillatorType, vol: number, delay: number): void {
     if (!this.ctx || !this.sfxGain) return;
     const osc = this.ctx.createOscillator();

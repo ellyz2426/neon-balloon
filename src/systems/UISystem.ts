@@ -281,6 +281,15 @@ export class UISystem extends createSystem({}) {
       this.hudPanel.getElementById('dash')?.setProperties({ text: 'DASH READY' });
     }
 
+    // Bubble indicator
+    if (state.bubbleCooldown > 0) {
+      this.hudPanel.getElementById('bubble')?.setProperties({
+        text: `BUBBLE ${Math.ceil(state.bubbleCooldown * 10) / 10}s`,
+      });
+    } else {
+      this.hudPanel.getElementById('bubble')?.setProperties({ text: 'BUBBLE READY' });
+    }
+
     // Elapsed time
     const elapsed = state.gameTime;
     const eMin = Math.floor(elapsed / 60);

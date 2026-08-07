@@ -11,6 +11,29 @@ export type Difficulty = 'easy' | 'normal' | 'hard';
 export type ColorTheme = 'neon-cyan' | 'neon-pink' | 'neon-green' | 'neon-gold';
 export type FormationType = 'v-shape' | 'line' | 'circle' | 'none';
 
+export interface BubbleProjectile {
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  active: boolean;
+  timer: number;
+  mesh: import('@iwsdk/core').Object3D | null;
+}
+
+export interface AcidDrop {
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+  vy: number;
+  active: boolean;
+  warningTimer: number;
+  mesh: import('@iwsdk/core').Object3D | null;
+  warningMesh: import('@iwsdk/core').Object3D | null;
+}
+
 export interface WhirlpoolData {
   id: number;
   x: number;
@@ -289,6 +312,17 @@ class GameState {
   dashDirX = 0;
   dashDirY = 0;
 
+  // Bubble attack
+  bubbleCooldown = 0;
+  bubbles: BubbleProjectile[] = [];
+
+  // Boost flap
+  boostFlapAvailable = false;
+  boostFlapWindow = 0;
+
+  // Acid rain
+  acidDrops: AcidDrop[] = [];
+
   // Combo flash
   comboFlashTimer = 0;
 
@@ -398,6 +432,11 @@ class GameState {
     this.dashTimer = 0;
     this.dashDirX = 0;
     this.dashDirY = 0;
+    this.bubbleCooldown = 0;
+    this.bubbles = [];
+    this.boostFlapAvailable = false;
+    this.boostFlapWindow = 0;
+    this.acidDrops = [];
     this.comboFlashTimer = 0;
     this.phaseTransitionTimer = 0;
     this.shakeTimer = 0;
